@@ -59,6 +59,15 @@ const configSchema = z.object({
   // Bridge API (SOL-Gateway-DCC)
   BRIDGE_API_URL: z.string().url().default('http://localhost:3000/api/v1'),
 
+  // Solana RPC
+  SOLANA_RPC_URL: z.string().url().default('https://api.mainnet-beta.solana.com'),
+
+  // Staking API (stDCC Liquid Staking Protocol)
+  STAKING_API_URL: z.string().url().default('http://localhost:3002/api'),
+
+  // AMM API (Liquidity Pools)
+  AMM_API_URL: z.string().url().default('http://localhost:3001'),
+
   // Rate Limits
   RATE_LIMIT_WINDOW_MS: z.string().transform(Number).pipe(z.number().positive()).default('60000'),
   RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).pipe(z.number().positive()).default('30'),

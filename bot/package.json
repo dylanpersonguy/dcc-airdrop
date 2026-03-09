@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.10.0",
+    "@solana/web3.js": "^1.98.4",
     "@waves/ts-lib-crypto": "^1.4.4",
     "@waves/waves-transactions": "^4.3.11",
     "dotenv": "^16.4.0",

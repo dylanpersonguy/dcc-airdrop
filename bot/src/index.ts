@@ -6,7 +6,7 @@ import { logger } from './utils/logger';
 import { connectRedis, disconnectRedis, getRedis } from './utils/redis';
 import prisma from './db/prisma';
 import { createBot } from './bot';
-import { startEligibilityRefreshJob, startLockFinalizationJob } from './jobs';
+import { startEligibilityRefreshJob, startLockFinalizationJob, startDepositWatcherJob } from './jobs';
 import { createServer } from 'http';
 
 async function main(): Promise<void> {
@@ -32,12 +32,15 @@ async function main(): Promise<void> {
     { command: 'buy', description: 'Buy DCC with SOL/USDC/USDT' },
     { command: 'lock', description: 'Lock DCC for 3% daily rewards' },
     { command: 'redeem', description: 'Redeem off-chain DCC to wallet' },
+    { command: 'stake', description: 'Stake DCC for stDCC rewards' },
+    { command: 'liquidity', description: 'Add liquidity to LP pools' },
     { command: 'help', description: 'Help & FAQ' },
   ]);
 
   // 4. Start background jobs
   startEligibilityRefreshJob();
   startLockFinalizationJob();
+  startDepositWatcherJob();
 
   // 5. Start bot in polling mode
   logger.info('Bot starting in polling mode...');

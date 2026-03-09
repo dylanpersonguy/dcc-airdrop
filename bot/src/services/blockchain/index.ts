@@ -154,6 +154,35 @@ export async function getWalletBalances(wallet: string): Promise<WalletBalances>
   };
 }
 
+/** Token balance entry from the node's all-assets endpoint */
+export interface TokenBalance {
+  assetId: string;
+  name: string;
+  balance: number;
+  decimals: number;
+}
+
+/** Fetch all token balances for a wallet (DCC native + all issued assets) */
+export async function getAllTokenBalances(wallet: string): Promise<{ dcc: number; tokens: TokenBalance[] }> {
+  const [dccData, assetsData] = await Promise.all([
+    nodeGet<{ balance: number }>(`/addresses/balance/${wallet}`).catch(() => ({ balance: 0 })),
+    nodeGet<{ balances: Array<{ assetId: string; balance: number; issueTransaction?: { name: string; decimals: number } }> }>(
+      `/assets/balance/${wallet}`,
+    ).catch(() => ({ balances: [] })),
+  ]);
+
+  const tokens: TokenBalance[] = assetsData.balances
+    .filter((b) => b.balance > 0 && b.issueTransaction)
+    .map((b) => ({
+      assetId: b.assetId,
+      name: b.issueTransaction!.name,
+      balance: b.balance,
+      decimals: b.issueTransaction!.decimals,
+    }));
+
+  return { dcc: dccData.balance, tokens };
+}
+
 /** Check on-chain AirdropClaim contract state for a user */
 export async function getClaimStatus(wallet: string): Promise<OnChainClaimState> {
   const [claimLive, userClaimed, claimTxId] = await Promise.all([

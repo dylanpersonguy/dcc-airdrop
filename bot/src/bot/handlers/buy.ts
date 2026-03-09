@@ -17,6 +17,8 @@ import {
   getLocalQuote,
   DCC_PRICE_USD,
 } from '../../services/bridge';
+import { getUserWallet } from '../../services/wallet';
+import { getOrCreateSolanaWallet } from '../../services/solana';
 import prisma from '../../db/prisma';
 import { logger } from '../../utils/logger';
 import { audit } from '../../utils/audit';
@@ -64,7 +66,7 @@ export async function handleBuyToken(ctx: BotContext): Promise<void> {
   let limitsText = '';
   try {
     const limits = await getDepositLimits(token);
-    limitsText = `\nMin: *${limits.min} ${token}* · Max: *${limits.max} ${token}*`;
+    limitsText = `\nMin: *${limits.minDeposit} ${token}* · Max: *${limits.maxDeposit} ${token}*`;
   } catch {
     // Bridge may be unavailable — proceed without limits
   }
@@ -166,7 +168,7 @@ Confirm this purchase?
   }
 }
 
-// ── Step 4: Confirmed → generate deposit ──
+// ── Step 4: Confirmed → show deposit address ──
 
 export async function handleBuyConfirm(ctx: BotContext): Promise<void> {
   if (!ctx.dbUser) return;
@@ -188,28 +190,28 @@ export async function handleBuyConfirm(ctx: BotContext): Promise<void> {
   const dccAmount = parseFloat(dccAmountStr);
 
   try {
-    // Generate deposit instruction
-    const deposit = token === 'SOL'
-      ? await generateSolDeposit(amount)
-      : await generateSplDeposit(token, amount);
+    // Get user's DCC wallet address for bridge recipientDcc
+    const wallet = await getUserWallet(ctx.dbUser.id);
+    if (!wallet) {
+      await clearSession(ctx.dbUser.id);
+      await editOrReply(ctx, '⚠️ No wallet found. Use /start to create one first.', {
+        parse_mode: 'Markdown' as const,
+        reply_markup: backToMainKeyboard(),
+      });
+      return;
+    }
 
-    // Register transfer with bridge
-    const transfer = await registerTransfer({
-      token,
-      amount,
-      depositAddress: deposit.depositAddress,
-      userId: ctx.dbUser.id,
-    });
+    // Get or create custodial Solana wallet for this user
+    const solWallet = await getOrCreateSolanaWallet(ctx.dbUser.id);
 
-    // Create purchase record in DB
-    await prisma.dccPurchase.create({
+    // Create purchase record — deposit watcher will process it once SOL arrives
+    const purchase = await prisma.dccPurchase.create({
       data: {
         userId: ctx.dbUser.id,
         token,
         amountPaid: amount,
         dccAmount,
-        bridgeTransferId: transfer.id,
-        depositAddress: deposit.depositAddress,
+        depositAddress: solWallet.publicKey,
         status: 'PENDING',
       },
     });
@@ -220,43 +222,43 @@ export async function handleBuyConfirm(ctx: BotContext): Promise<void> {
       action: 'purchase_initiated',
       targetType: 'user',
       targetId: ctx.dbUser.id,
-      metadata: { token, amount, dccAmount, transferId: transfer.id },
+      metadata: { token, amount, dccAmount, purchaseId: purchase.id, depositAddress: solWallet.publicKey },
     });
 
     // Clear session
     await clearSession(ctx.dbUser.id);
 
-    const memoLine = 'memo' in deposit && deposit.memo
-      ? `│ Memo: \`${deposit.memo}\`\n` : '';
-
     await editOrReply(ctx, `
-✅ *Deposit Instructions*
+✅ *Deposit Address Ready*
 
-Send exactly *${amount} ${token}* to:
+Send exactly *${amount} ${token}* to your personal Solana address:
+
+\`${solWallet.publicKey}\`
 
 ┌─────────────────────────
-│ Address:
-│ \`${deposit.depositAddress}\`
-${memoLine}│ ──────────────────
 │ Amount: *${amount} ${token}*
 │ You'll receive: *${dccAmount} DCC*
-│ Transfer ID: \`${transfer.id}\`
+│ DCC Wallet: \`${wallet.address}\`
 └─────────────────────────
 
-⏳ After sending, use the button below to check your transfer status.
+⏳ The bot will automatically detect your deposit and process the bridge transaction.
 
 ⚠️ Send *only ${token}* to this address on the *Solana* network.
+⚠️ Do *not* send from an exchange — send from a Solana wallet you control.
     `.trim(), {
       parse_mode: 'Markdown' as const,
-      reply_markup: buyCheckStatusKeyboard(transfer.id),
+      reply_markup: new InlineKeyboard()
+        .text('📋 Purchase History', 'buy_history')
+        .row()
+        .text('◀️ Main Menu', 'main_menu'),
     });
   } catch (err) {
-    logger.error({ err, token, amount }, 'Failed to generate deposit');
+    logger.error({ err, token, amount }, 'Failed to generate deposit address');
     await clearSession(ctx.dbUser.id);
     await editOrReply(ctx, `
 ⚠️ *Deposit Generation Failed*
 
-The bridge service could not generate deposit instructions.
+Could not generate your deposit address.
 Your funds are safe — nothing was charged.
 
 Tap Retry to try again.
@@ -296,15 +298,15 @@ export async function handleBuyStatus(ctx: BotContext): Promise<void> {
   if (!transferId) return;
 
   try {
-    const status = await getTransferStatus(transferId);
+    const transfer = await getTransferStatus(transferId);
 
     // Update DB purchase status if changed
-    if (status.status === 'completed') {
+    if (transfer.status === 'completed') {
       await prisma.dccPurchase.updateMany({
         where: { bridgeTransferId: transferId, userId: ctx.dbUser.id },
         data: {
           status: 'COMPLETED',
-          solanaTxId: status.solanaTxId ?? undefined,
+          solanaTxId: transfer.sourceTxHash ?? undefined,
         },
       });
       await audit({
@@ -312,9 +314,9 @@ export async function handleBuyStatus(ctx: BotContext): Promise<void> {
         action: 'purchase_completed',
         targetType: 'user',
         targetId: ctx.dbUser.id,
-        metadata: { transferId, dccAmount: status.dccAmount, solanaTxId: status.solanaTxId },
+        metadata: { transferId, amountFormatted: transfer.amountFormatted, sourceTxHash: transfer.sourceTxHash },
       });
-    } else if (status.status === 'failed') {
+    } else if (transfer.status === 'failed') {
       await prisma.dccPurchase.updateMany({
         where: { bridgeTransferId: transferId, userId: ctx.dbUser.id },
         data: { status: 'FAILED' },
@@ -324,18 +326,26 @@ export async function handleBuyStatus(ctx: BotContext): Promise<void> {
         action: 'purchase_failed',
         targetType: 'user',
         targetId: ctx.dbUser.id,
-        metadata: { transferId },
+        metadata: { transferId, error: transfer.error },
       });
     }
 
-    const statusEmoji = {
-      pending: '⏳',
-      processing: '🔄',
+    const statusEmoji: Record<string, string> = {
+      pending_confirmation: '⏳',
+      awaiting_consensus: '⏳',
+      consensus_reached: '🔄',
+      minting: '🔄',
       completed: '✅',
       failed: '❌',
-    }[status.status] ?? '❓';
+      expired: '⌛',
+      paused: '⏸️',
+    };
 
-    const completedNote = status.status === 'completed'
+    const isComplete = transfer.status === 'completed';
+    const isFailed = transfer.status === 'failed' || transfer.status === 'expired';
+    const emoji = statusEmoji[transfer.status] ?? '❓';
+
+    const completedNote = isComplete
       ? '\n\n💰 DCC has been added to your off-chain balance!\nUse /redeem to move it to your on-chain wallet.'
       : '';
 
@@ -343,18 +353,18 @@ export async function handleBuyStatus(ctx: BotContext): Promise<void> {
 📋 *Transfer Status*
 
 ┌─────────────────────────
-│ ID: \`${status.id}\`
-│ Status: ${statusEmoji} *${status.status.toUpperCase()}*
-│ Token: ${status.token}
-│ Paid: ${status.inputAmount} ${status.token}
-│ DCC: ${status.dccAmount} DCC
-${status.solanaTxId ? `│ Solana TX: \`${status.solanaTxId}\`\n` : ''}└─────────────────────────
+│ ID: \`${transfer.transferId}\`
+│ Status: ${emoji} *${transfer.status.toUpperCase().replace(/_/g, ' ')}*
+│ Amount: ${transfer.amountFormatted}
+│ Direction: ${transfer.direction === 'sol_to_dcc' ? 'SOL → DCC' : 'DCC → SOL'}
+│ Confirmations: ${transfer.confirmations}
+${transfer.sourceTxHash ? `│ Source TX: \`${transfer.sourceTxHash}\`\n` : ''}${transfer.destTxHash ? `│ Dest TX: \`${transfer.destTxHash}\`\n` : ''}└─────────────────────────
 ${completedNote}
     `.trim(), {
       parse_mode: 'Markdown' as const,
-      reply_markup: status.status === 'completed'
+      reply_markup: isComplete
         ? afterBuyKeyboard()
-        : status.status === 'failed'
+        : isFailed
         ? backToMainKeyboard()
         : buyCheckStatusKeyboard(transferId),
     });

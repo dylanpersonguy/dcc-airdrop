@@ -57,6 +57,8 @@ export function welcomeMessageWithBalance(offChainDCC: number, lockedDCC?: numbe
 ━━ *Quick Actions* ━━━━━━━━
 💳 /buy — Purchase DCC ($0.15/DCC)
 🔒 /lock — Lock & earn ${ratePct}% daily
+🥩 /stake — Stake DCC for stDCC rewards
+🌊 /liquidity — Add liquidity to LP pools
 📥 /deposit — Deposit on-chain DCC to your balance
 🎁 /redeem — Withdraw to your wallet
 👥 /referrals — Grow your network

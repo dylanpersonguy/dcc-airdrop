@@ -18,6 +18,8 @@ export function mainMenuKeyboard(): InlineKeyboard {
     .text('📥 Deposit', 'deposit').row()
     .text('🔒 Lock & Earn', 'lock')
     .text('💸 Redeem', 'redeem').row()
+    .text('🥩 Stake', 'stake').row()
+    .text('🌊 Liquidity', 'liquidity').row()
     .text('─────────────────', 'noop').row()
     .text('📋 Claim Status', 'claim_status')
     .text('❓ Help & FAQ', 'help_menu');
@@ -33,7 +35,8 @@ export function walletMenuKeyboard(hasOnChain: boolean = false, hasOffChain: boo
     kb.text('🔒 Lock DCC', 'lock')
       .text('🎁 Redeem DCC', 'redeem').row();
   }
-  kb.text('📋 Copy Address', 'wallet_address')
+  kb.text('� Balances', 'wallet_balances')
+    .text('🥩 Stake', 'stake').row();  kb.text('🌊 Liquidity', 'liquidity').row();  kb.text('�📋 Copy Address', 'wallet_address')
     .text('🔑 Export Seed', 'export_seed').row()
     .text('📜 Activity', 'history')
     .text('◀️ Main Menu', 'main_menu');

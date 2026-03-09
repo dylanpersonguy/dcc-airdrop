@@ -15,7 +15,7 @@ import {
 } from '../keyboards';
 import { generateWalletForUser, exportSeedPhrase } from '../../services/wallet';
 import { getTotalOffChainBalance } from '../../services/purchases';
-import { getCachedBalances } from '../../services/blockchain';
+import { getCachedBalances, getAllTokenBalances } from '../../services/blockchain';
 import { getBoostedRate } from '../../services/locks';
 import { WAVELETS_PER_DCC } from '../../config/constants';
 
@@ -114,4 +114,45 @@ export async function handleExportSeedConfirm(ctx: BotContext): Promise<void> {
       // Message may already be deleted by user
     }
   }, 60_000);
+}
+
+/**
+ * Show all token balances for the user's wallet.
+ */
+export async function handleBalances(ctx: BotContext): Promise<void> {
+  if (!ctx.dbUser) return;
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery();
+
+  const wallet = await generateWalletForUser(ctx.dbUser.id);
+
+  try {
+    const { dcc, tokens } = await getAllTokenBalances(wallet.address);
+    const dccAmount = dcc / WAVELETS_PER_DCC;
+
+    let msg = `💰 *Token Balances*\n\n`;
+    msg += `*DCC:* ${dccAmount.toFixed(4)} DCC\n`;
+
+    if (tokens.length > 0) {
+      msg += `\n*Other Tokens:*\n`;
+      for (const t of tokens) {
+        const bal = t.balance / Math.pow(10, t.decimals);
+        msg += `• *${t.name}:* ${bal.toFixed(t.decimals > 4 ? 4 : t.decimals)}\n`;
+      }
+    } else {
+      msg += `\n_No other tokens found._`;
+    }
+
+    await ctx.editMessageText(msg, {
+      parse_mode: 'Markdown',
+      reply_markup: backToMainKeyboard(),
+    }).catch(() =>
+      ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: backToMainKeyboard() }),
+    );
+  } catch {
+    await ctx.editMessageText('⚠️ Could not load balances. Please try again.', {
+      reply_markup: backToMainKeyboard(),
+    }).catch(() =>
+      ctx.reply('⚠️ Could not load balances. Please try again.', { reply_markup: backToMainKeyboard() }),
+    );
+  }
 }

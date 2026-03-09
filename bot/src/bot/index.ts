@@ -17,7 +17,27 @@ import {
 import { handleStart } from './commands/start';
 
 // Handlers
-import { handleMyWallet, handleWalletAddress, handleExportSeed, handleExportSeedConfirm } from './handlers/wallet';
+import { handleMyWallet, handleWalletAddress, handleExportSeed, handleExportSeedConfirm, handleBalances } from './handlers/wallet';
+import {
+  handleStake,
+  handleStakeDeposit,
+  handleStakeWithdraw,
+  handleStakeAmount,
+  handleUnstakeAmount,
+  handleStakeConfirm,
+  handleUnstakeConfirm,
+} from './handlers/stake';
+import {
+  handleLiquidity,
+  handlePoolDetail,
+  handleLpPositions,
+  handleLpAdd,
+  handleLpAmount,
+  handleLpConfirm,
+  handleLpRemove,
+  handleLpRemoveAmount,
+  handleLpRemoveConfirm,
+} from './handlers/liquidity';
 import { handleMyEligibility, handleMyAirdrop } from './handlers/eligibility';
 import {
   handleReferralsMenu,
@@ -104,6 +124,8 @@ export function createBot(): Bot<BotContext> {
   bot.command('buy', handleBuy);
   bot.command('lock', handleLock);
   bot.command('deposit', handleDeposit);
+  bot.command('stake', handleStake);
+  bot.command('liquidity', handleLiquidity);
 
   // ── Admin commands (guarded) ────────────
   bot.command('admin', requireAdmin, handleAdmin);
@@ -147,8 +169,25 @@ export function createBot(): Bot<BotContext> {
   // Wallet
   bot.callbackQuery('my_wallet', handleMyWallet);
   bot.callbackQuery('wallet_address', handleWalletAddress);
+  bot.callbackQuery('wallet_balances', handleBalances);
   bot.callbackQuery('export_seed', handleExportSeed);
   bot.callbackQuery('export_seed_confirm', handleExportSeedConfirm);
+
+  // Staking
+  bot.callbackQuery('stake', handleStake);
+  bot.callbackQuery('stake_deposit', handleStakeDeposit);
+  bot.callbackQuery('stake_withdraw', handleStakeWithdraw);
+  bot.callbackQuery('stake_confirm', handleStakeConfirm);
+  bot.callbackQuery('unstake_confirm', handleUnstakeConfirm);
+
+  // Liquidity
+  bot.callbackQuery('liquidity', handleLiquidity);
+  bot.callbackQuery(/^lpp_/, handlePoolDetail);
+  bot.callbackQuery('lp_positions', handleLpPositions);
+  bot.callbackQuery(/^lpa_/, handleLpAdd);
+  bot.callbackQuery('lp_confirm', handleLpConfirm);
+  bot.callbackQuery('lp_remove_confirm', handleLpRemoveConfirm);
+  bot.callbackQuery(/^lpr_/, handleLpRemove);
 
   // Eligibility / airdrop
   bot.callbackQuery('my_eligibility', handleMyEligibility);
@@ -216,6 +255,18 @@ export function createBot(): Bot<BotContext> {
     if (ctx.sessionStep === 'lock:enter_amount') {
       return handleLockAmount(ctx);
     }
+    if (ctx.sessionStep === 'stake:enter_amount') {
+      return handleStakeAmount(ctx);
+    }
+    if (ctx.sessionStep === 'stake:enter_unstake_amount') {
+      return handleUnstakeAmount(ctx);
+    }
+    if (ctx.sessionStep === 'lp:enter_amount') {
+      return handleLpAmount(ctx);
+    }
+    if (ctx.sessionStep === 'lp:enter_remove_amount') {
+      return handleLpRemoveAmount(ctx);
+    }
 
     // No active session — check if user might be typing an amount into an expired flow
     const text = ctx.message.text.trim();
@@ -223,7 +274,9 @@ export function createBot(): Bot<BotContext> {
       await ctx.reply(
         '⚠️ Your session expired. Please restart the action you were performing:\n\n'
         + '💳 /buy — Purchase DCC\n'
-        + '🔒 /lock — Lock DCC',
+        + '🔒 /lock — Lock DCC\n'
+        + '🥩 /stake — Stake DCC\n'
+        + '🌊 /liquidity — LP Pools',
         { parse_mode: 'Markdown', reply_markup: mainMenuKeyboard() },
       );
     }

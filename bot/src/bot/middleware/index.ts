@@ -135,6 +135,13 @@ export interface SessionData {
   buyDccAmount?: string;
   buyUsdValue?: string;
   lockAmount?: string;
+  stakeAmount?: string;
+  stakeShares?: string;
+  lpPoolKey?: string;
+  lpAmountA?: string;
+  lpAmountB?: string;
+  lpFeeBps?: string;
+  lpRemoveAmount?: string;
 }
 
 const SESSION_TTL = 3600; // 1 hour
