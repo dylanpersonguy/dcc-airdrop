@@ -1,0 +1,377 @@
+
+{-# STDLIB_VERSION 5 #-}
+{-# CONTENT_TYPE DAPP #-}
+{-# SCRIPT_TYPE ACCOUNT #-}
+
+
+func addrToStr(a: Address) = toString(a)
+
+func strToAddr(s: String) = addressFromStringValue(s)
+
+
+func keyPoolCount(addr: String)        = "user:" + addr + ":poolCount"
+func keySwapCount(addr: String)        = "user:" + addr + ":swapCount"
+func keyDappCount(addr: String)        = "user:" + addr + ":dappCount"
+func keyEverStaked(addr: String)       = "user:" + addr + ":everStaked"
+func keyHasCurrentStake(addr: String)  = "user:" + addr + ":hasCurrentStake"
+func keyFirstStakeHeight(addr: String) = "user:" + addr + ":firstStakeHeight"
+func keyFirstLpHeight(addr: String)    = "user:" + addr + ":firstLpHeight"
+func keyHasCurrentLp(addr: String)     = "user:" + addr + ":hasCurrentLp"
+func keyWalletAgeOk(addr: String)      = "user:" + addr + ":walletAgeOk"
+func keyTxCountOk(addr: String)        = "user:" + addr + ":txCountOk"
+func keySybilFlag(addr: String)        = "user:" + addr + ":sybilFlag"
+func keyClaimed(addr: String)          = "user:" + addr + ":claimed"
+func keyLastSwapHeight(addr: String)   = "user:" + addr + ":lastSwapHeight"
+func keyLastLpHeight(addr: String)     = "user:" + addr + ":lastLpHeight"
+func keyLastActivityHeight(addr: String) = "user:" + addr + ":lastActivityHeight"
+
+func keyPoolSeen(addr: String, poolId: String)   = "user:" + addr + ":pool:" + poolId
+func keyPoolActive(addr: String, poolId: String)  = "user:" + addr + ":poolActive:" + poolId
+
+func keyDappSeen(addr: String, dappId: String)    = "user:" + addr + ":dapp:" + dappId
+
+func keyAllowedDapp(addr: String)    = "allowed:dapp:" + addr
+func keyAllowedUpdater(addr: String) = "allowed:updater:" + addr
+
+func keyAdmin(addr: String)   = "admin:" + addr
+let keyConfigVersion       = "config:version"
+let keyConfigInitialized   = "config:initialized"
+
+
+func intOrZero(key: String) = match getInteger(this, key) {
+  case v: Int => v
+  case _      => 0
+}
+
+func boolOrFalse(key: String) = match getBoolean(this, key) {
+  case v: Boolean => v
+  case _          => false
+}
+
+
+func isAdmin(caller: Address) = boolOrFalse(keyAdmin(addrToStr(caller)))
+
+func isAllowedDapp(caller: Address) = boolOrFalse(keyAllowedDapp(addrToStr(caller)))
+
+func isAllowedUpdater(caller: Address) = boolOrFalse(keyAllowedUpdater(addrToStr(caller)))
+
+func requireAdmin(caller: Address) =
+  if (!isAdmin(caller)) then throw("Only admin") else true
+
+func requireAllowedDapp(caller: Address) =
+  if (!isAllowedDapp(caller)) then throw("Only allowed dApp") else true
+
+func requireAllowedUpdater(caller: Address) =
+  if (!isAllowedUpdater(caller)) then throw("Only allowed updater") else true
+
+func requireAdminOrUpdater(caller: Address) =
+  if (!isAdmin(caller) && !isAllowedUpdater(caller))
+    then throw("Only admin or updater")
+    else true
+
+func requireInitialized() =
+  if (!boolOrFalse(keyConfigInitialized)) then throw("Not initialized") else true
+
+
+func requireNonEmptyString(value: String, name: String) =
+  if (size(value) == 0) then throw(name + " must not be empty") else true
+
+func requireValidAddress(addrStr: String) = {
+  let chk = strToAddr(addrStr)
+  true
+}
+
+
+func dappSeenEntries(addr: String, dappId: String) = {
+  let seen = boolOrFalse(keyDappSeen(addr, dappId))
+  if (seen) then [] else {
+    let currentCount = intOrZero(keyDappCount(addr))
+    [
+      BooleanEntry(keyDappSeen(addr, dappId), true),
+      IntegerEntry(keyDappCount(addr), currentCount + 1)
+    ]
+  }
+}
+
+
+@Callable(i)
+func init() = {
+  if (boolOrFalse(keyConfigInitialized))
+    then throw("Already initialized")
+    else {
+      let deployer = addrToStr(i.caller)
+      [
+        BooleanEntry(keyConfigInitialized, true),
+        StringEntry(keyConfigVersion, "1.0.0"),
+        BooleanEntry(keyAdmin(deployer), true)
+      ]
+    }
+}
+
+@Callable(i)
+func addAdmin(adminAddress: String) = {
+  strict c1 = requireInitialized()
+  strict c2 = requireAdmin(i.caller)
+  strict c3 = requireValidAddress(adminAddress)
+  [
+    BooleanEntry(keyAdmin(adminAddress), true)
+  ]
+}
+
+@Callable(i)
+func removeAdmin(adminAddress: String) = {
+
+
+
+
+  strict c4 = requireInitialized()
+  strict c5 = requireAdmin(i.caller)
+  strict c6 = requireValidAddress(adminAddress)
+  [
+    BooleanEntry(keyAdmin(adminAddress), false)
+  ]
+}
+
+@Callable(i)
+func allowDapp(dappAddress: String) = {
+  strict c7 = requireInitialized()
+  strict c8 = requireAdmin(i.caller)
+  strict c9 = requireValidAddress(dappAddress)
+  [
+    BooleanEntry(keyAllowedDapp(dappAddress), true)
+  ]
+}
+
+@Callable(i)
+func revokeDapp(dappAddress: String) = {
+  strict c10 = requireInitialized()
+  strict c11 = requireAdmin(i.caller)
+  strict c12 = requireValidAddress(dappAddress)
+  [
+    BooleanEntry(keyAllowedDapp(dappAddress), false)
+  ]
+}
+
+@Callable(i)
+func allowUpdater(updaterAddress: String) = {
+  strict c13 = requireInitialized()
+  strict c14 = requireAdmin(i.caller)
+  strict c15 = requireValidAddress(updaterAddress)
+  [
+    BooleanEntry(keyAllowedUpdater(updaterAddress), true)
+  ]
+}
+
+@Callable(i)
+func revokeUpdater(updaterAddress: String) = {
+  strict c16 = requireInitialized()
+  strict c17 = requireAdmin(i.caller)
+  strict c18 = requireValidAddress(updaterAddress)
+  [
+    BooleanEntry(keyAllowedUpdater(updaterAddress), false)
+  ]
+}
+
+@Callable(i)
+func recordDappInteraction(user: String, dappId: String) = {
+  strict c19 = requireInitialized()
+  strict c20 = requireAllowedDapp(i.caller)
+  strict c21 = requireValidAddress(user)
+  strict c22 = requireNonEmptyString(dappId, "dappId")
+
+  let addr = user
+  let dappEntries = dappSeenEntries(addr, dappId)
+
+  dappEntries ++ [
+    IntegerEntry(keyLastActivityHeight(addr), height)
+  ]
+}
+
+@Callable(i)
+func recordSwap(user: String, dappId: String) = {
+  strict c23 = requireInitialized()
+  strict c24 = requireAllowedDapp(i.caller)
+  strict c25 = requireValidAddress(user)
+  strict c26 = requireNonEmptyString(dappId, "dappId")
+
+  let addr = user
+  let currentSwaps = intOrZero(keySwapCount(addr))
+  let dappEntries = dappSeenEntries(addr, dappId)
+
+  dappEntries ++ [
+    IntegerEntry(keySwapCount(addr), currentSwaps + 1),
+    IntegerEntry(keyLastSwapHeight(addr), height),
+    IntegerEntry(keyLastActivityHeight(addr), height)
+  ]
+}
+
+@Callable(i)
+func recordLpAdd(user: String, poolId: String, dappId: String) = {
+  strict c27 = requireInitialized()
+  strict c28 = requireAllowedDapp(i.caller)
+  strict c29 = requireValidAddress(user)
+  strict c30 = requireNonEmptyString(poolId, "poolId")
+  strict c31 = requireNonEmptyString(dappId, "dappId")
+
+  let addr = user
+
+
+  let firstLpEntries =
+    if (intOrZero(keyFirstLpHeight(addr)) == 0)
+      then [ IntegerEntry(keyFirstLpHeight(addr), height) ]
+      else []
+
+
+  let poolSeen = boolOrFalse(keyPoolSeen(addr, poolId))
+  let poolEntries =
+    if (poolSeen) then [] else {
+      let currentPools = intOrZero(keyPoolCount(addr))
+      [
+        BooleanEntry(keyPoolSeen(addr, poolId), true),
+        IntegerEntry(keyPoolCount(addr), currentPools + 1)
+      ]
+    }
+
+
+  let dappEntries = dappSeenEntries(addr, dappId)
+
+  firstLpEntries ++ poolEntries ++ dappEntries ++ [
+    BooleanEntry(keyPoolActive(addr, poolId), true),
+    BooleanEntry(keyHasCurrentLp(addr), true),
+    IntegerEntry(keyLastLpHeight(addr), height),
+    IntegerEntry(keyLastActivityHeight(addr), height)
+  ]
+}
+
+@Callable(i)
+func recordLpRemove(user: String, poolId: String, dappId: String,
+                     stillHasAnyLp: Boolean, stillHasLpInThisPool: Boolean) = {
+  strict c32 = requireInitialized()
+  strict c33 = requireAllowedDapp(i.caller)
+  strict c34 = requireValidAddress(user)
+  strict c35 = requireNonEmptyString(poolId, "poolId")
+  strict c36 = requireNonEmptyString(dappId, "dappId")
+
+  let addr = user
+  let dappEntries = dappSeenEntries(addr, dappId)
+
+  dappEntries ++ [
+    BooleanEntry(keyPoolActive(addr, poolId), stillHasLpInThisPool),
+    BooleanEntry(keyHasCurrentLp(addr), stillHasAnyLp),
+    IntegerEntry(keyLastLpHeight(addr), height),
+    IntegerEntry(keyLastActivityHeight(addr), height)
+  ]
+}
+
+@Callable(i)
+func recordStake(user: String, dappId: String) = {
+  strict c37 = requireInitialized()
+  strict c38 = requireAllowedDapp(i.caller)
+  strict c39 = requireValidAddress(user)
+  strict c40 = requireNonEmptyString(dappId, "dappId")
+
+  let addr = user
+
+
+  let firstStakeEntries =
+    if (intOrZero(keyFirstStakeHeight(addr)) == 0)
+      then [ IntegerEntry(keyFirstStakeHeight(addr), height) ]
+      else []
+
+  let dappEntries = dappSeenEntries(addr, dappId)
+
+  firstStakeEntries ++ dappEntries ++ [
+    BooleanEntry(keyEverStaked(addr), true),
+    BooleanEntry(keyHasCurrentStake(addr), true),
+    IntegerEntry(keyLastActivityHeight(addr), height)
+  ]
+}
+
+@Callable(i)
+func recordUnstake(user: String, dappId: String, stillHasStake: Boolean) = {
+  strict c41 = requireInitialized()
+  strict c42 = requireAllowedDapp(i.caller)
+  strict c43 = requireValidAddress(user)
+  strict c44 = requireNonEmptyString(dappId, "dappId")
+
+  let addr = user
+  let dappEntries = dappSeenEntries(addr, dappId)
+
+  dappEntries ++ [
+    BooleanEntry(keyHasCurrentStake(addr), stillHasStake),
+    IntegerEntry(keyLastActivityHeight(addr), height)
+  ]
+}
+
+@Callable(i)
+func setWalletAgeOk(user: String, value: Boolean) = {
+  strict c45 = requireInitialized()
+  strict c46 = requireAdminOrUpdater(i.caller)
+  strict c47 = requireValidAddress(user)
+  [
+    BooleanEntry(keyWalletAgeOk(user), value)
+  ]
+}
+
+@Callable(i)
+func setTxCountOk(user: String, value: Boolean) = {
+  strict c48 = requireInitialized()
+  strict c49 = requireAdminOrUpdater(i.caller)
+  strict c50 = requireValidAddress(user)
+  [
+    BooleanEntry(keyTxCountOk(user), value)
+  ]
+}
+
+@Callable(i)
+func setSybilFlag(user: String, value: Boolean) = {
+  strict c51 = requireInitialized()
+  strict c52 = requireAdminOrUpdater(i.caller)
+  strict c53 = requireValidAddress(user)
+  [
+    BooleanEntry(keySybilFlag(user), value)
+  ]
+}
+
+@Callable(i)
+func setUserFlags(user: String, walletAgeOk: Boolean, txCountOk: Boolean, sybilFlag: Boolean) = {
+  strict c54 = requireInitialized()
+  strict c55 = requireAdminOrUpdater(i.caller)
+  strict c56 = requireValidAddress(user)
+  [
+    BooleanEntry(keyWalletAgeOk(user), walletAgeOk),
+    BooleanEntry(keyTxCountOk(user), txCountOk),
+    BooleanEntry(keySybilFlag(user), sybilFlag)
+  ]
+}
+
+@Callable(i)
+func markClaimed(user: String) = {
+
+  strict c57 = requireInitialized()
+  strict c58 = requireValidAddress(user)
+  if (!isAdmin(i.caller) && !isAllowedDapp(i.caller))
+    then throw("Only admin or allowed dApp")
+    else {
+      if (boolOrFalse(keyClaimed(user)))
+        then throw("Already claimed")
+        else [
+          BooleanEntry(keyClaimed(user), true)
+        ]
+    }
+}
+
+@Callable(i)
+func unmarkClaimed(user: String) = {
+
+  strict c59 = requireInitialized()
+  strict c60 = requireAdmin(i.caller)
+  strict c61 = requireValidAddress(user)
+  [
+    BooleanEntry(keyClaimed(user), false)
+  ]
+}
+
+
+@Verifier(tx)
+func verify() = sigVerify(tx.bodyBytes, tx.proofs[0], tx.senderPublicKey)

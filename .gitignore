@@ -1,0 +1,37 @@
+# ── Dependencies ──────────────────────────────────
+node_modules/
+dist/
+
+# ── Environment & Secrets ─────────────────────────
+.env
+.env.local
+.env.*.local
+bot/.env
+
+# ── Docker ────────────────────────────────────────
+docker-compose.override.yml
+
+# ── IDE ───────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs ──────────────────────────────────────────
+*.log
+logs/
+
+# ── Build artifacts ───────────────────────────────
+*.tsbuildinfo
+
+# ── Prisma ────────────────────────────────────────
+bot/prisma/*.db
+bot/prisma/*.db-journal
+
+# ── Backups ───────────────────────────────────────
+*.bak

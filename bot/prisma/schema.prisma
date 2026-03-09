@@ -1,0 +1,359 @@
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Prisma Schema — DecentralChain Airdrop Bot
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── User ──────────────────────────────────
+
+model User {
+  id             String    @id @default(cuid())
+  telegramId     BigInt    @unique
+  username       String?
+  firstName      String?
+  lastName       String?
+  isAdmin        Boolean   @default(false)
+  referralCode   String    @unique
+  referredByUserId String?
+  referredByUser User?     @relation("Referrals", fields: [referredByUserId], references: [id])
+  referrals      User[]    @relation("Referrals")
+
+  wallets              Wallet[]
+  eligibilitySnapshots EligibilitySnapshot[]
+  referralsMade        ReferralEvent[]  @relation("ReferralsMade")
+  referralsReceived    ReferralEvent[]  @relation("ReferralsReceived")
+  referralRewards      ReferralReward[]
+  claimRecords         ClaimRecord[]
+  inviteRewards        InviteReward[]
+  dccPurchases         DccPurchase[]
+  dccLocks             DccLock[]
+  lockReferralRewards  LockReferralReward[]
+  dccDeposits          DccDeposit[]
+  auditLogs            AuditLog[]       @relation("AuditActor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([telegramId])
+  @@index([referralCode])
+}
+
+// ── Wallet ────────────────────────────────
+
+model Wallet {
+  id                            String    @id @default(cuid())
+  userId                        String
+  user                          User      @relation(fields: [userId], references: [id])
+  address                       String
+  encryptedSeed                 String?
+  isVerified                    Boolean   @default(false)
+  verificationMethod            String?
+  verificationChallenge         String?
+  verificationChallengeExpiresAt DateTime?
+  verifiedAt                    DateTime?
+
+  eligibilitySnapshots EligibilitySnapshot[]
+  claimRecords         ClaimRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, address])
+  @@index([address])
+  @@index([userId])
+}
+
+// ── EligibilitySnapshot ───────────────────
+
+model EligibilitySnapshot {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id])
+  walletId            String
+  wallet              Wallet   @relation(fields: [walletId], references: [id])
+  eligible            Boolean
+  stDCCBalance        BigInt   @default(0)
+  poolCount           Int      @default(0)
+  swapCount           Int      @default(0)
+  dappCount           Int      @default(0)
+  hasCurrentLp        Boolean  @default(false)
+  lpAgeBlocks         Int      @default(0)
+  walletAgeOk         Boolean  @default(false)
+  txCountOk           Boolean  @default(false)
+  sybilFlag           Boolean  @default(false)
+  claimed             Boolean  @default(false)
+  rawScore            Float?
+  estimatedAllocation Float?
+  snapshotJson        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([walletId])
+}
+
+// ── ReferralEvent ─────────────────────────
+// Multi-level: each event records the direct referrer → referred pair.
+// The `tier` field indicates which level this referral is at:
+//   tier 1 = direct referral (A invites B)
+//   tier 2 = B's referee was invited because of A's chain (B invites C → A gets tier-2 credit)
+//   tier 3 = (C invites D → A gets tier-3 credit)
+// For a single referred user joining, multiple ReferralEvent rows may be
+// created — one per ancestor up to MAX_REFERRAL_DEPTH.
+
+model ReferralEvent {
+  id              String  @id @default(cuid())
+  referrerUserId  String
+  referrerUser    User    @relation("ReferralsMade", fields: [referrerUserId], references: [id])
+  referredUserId  String
+  referredUser    User    @relation("ReferralsReceived", fields: [referredUserId], references: [id])
+  code            String
+  tier            Int     @default(1) // 1 = direct, 2 = second-level, 3 = third-level
+  status          ReferralStatus @default(PENDING)
+  metadataJson    String?
+
+  rewards ReferralReward[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([referrerUserId, referredUserId])
+  @@index([referredUserId])
+  @@index([referrerUserId])
+  @@index([referrerUserId, tier])
+  @@index([code])
+  @@index([tier])
+}
+
+enum ReferralStatus {
+  PENDING
+  WALLET_CONNECTED
+  WALLET_VERIFIED
+  ELIGIBLE
+  REWARDED
+  REJECTED
+}
+
+// ── ReferralReward ────────────────────────
+
+model ReferralReward {
+  id                    String  @id @default(cuid())
+  userId                String
+  user                  User    @relation(fields: [userId], references: [id])
+  sourceReferralEventId String
+  sourceReferralEvent   ReferralEvent @relation(fields: [sourceReferralEventId], references: [id])
+  rewardType            String  @default("referral_bonus")
+  tier                  Int     @default(1)
+  amount                Float
+  status                RewardStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([tier])
+}
+
+enum RewardStatus {
+  PENDING
+  CREDITED
+  CLAIMED
+  CANCELLED
+}
+
+// ── ClaimRecord ───────────────────────────
+
+model ClaimRecord {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  walletId     String
+  wallet       Wallet      @relation(fields: [walletId], references: [id])
+  campaignId   String?
+  status       ClaimStatus @default(PENDING)
+  txId         String?
+  amount       Float?
+  metadataJson String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([walletId])
+  @@index([txId])
+}
+
+enum ClaimStatus {
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+// ── InviteReward ──────────────────────────
+// Instant 1 DCC reward for each invited user who starts the bot.
+// Separate from the tiered ReferralReward system (which requires eligibility).
+
+model InviteReward {
+  id             String   @id @default(cuid())
+  userId         String                        // the inviter who earns the reward
+  user           User     @relation(fields: [userId], references: [id])
+  invitedUserId  String                        // the person who was invited
+  amount         Float    @default(1)          // DCC amount (1 per invite)
+  redeemed       Boolean  @default(false)
+  redeemedAt     DateTime?
+  redeemTxId     String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, invitedUserId])            // one reward per invited user
+  @@index([userId])
+  @@index([redeemed])
+}
+
+// ── DccPurchase ───────────────────────────
+// Off-chain DCC purchased via SOL/USDC/USDT through the bridge API.
+// User can /redeem to move purchased DCC to their on-chain wallet.
+
+model DccPurchase {
+  id               String         @id @default(cuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id])
+  token            String                    // SOL, USDC, USDT
+  amountPaid       Float                     // amount in source token
+  dccAmount        Float                     // DCC received/expected
+  bridgeTransferId String?                   // transfer ID from bridge API
+  depositAddress   String?                   // Solana deposit address
+  status           PurchaseStatus @default(PENDING)
+  solanaTxId       String?
+  redeemed         Boolean        @default(false)
+  redeemedAt       DateTime?
+  redeemTxId       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([userId, status])
+}
+
+enum PurchaseStatus {
+  PENDING
+  DEPOSITED
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+// ── DccLock ───────────────────────────────
+// Off-chain DCC locking: 3% daily rewards, 30-day lock period.
+// Users can lock available off-chain DCC (min 100) and compound earnings.
+
+model DccLock {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  amount      Float                          // DCC locked
+  dailyRate   Float      @default(0.03)      // 3% per day
+  startedAt   DateTime   @default(now())
+  expiresAt   DateTime                       // startedAt + 30 days
+  status      LockStatus @default(ACTIVE)
+  earnedDcc   Float      @default(0)         // snapshot of earned at unlock
+  unlockedAt  DateTime?
+  earningsRedeemed   Boolean   @default(false)
+  earningsRedeemedAt DateTime?
+  earningsRedeemTxId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum LockStatus {
+  ACTIVE
+  COMPLETED
+  WITHDRAWN
+}
+
+// ── LockReferralReward ─────────────────
+// When a lock is finalized, each upline referrer (up to 3 tiers)
+// receives a % of the lock's earned DCC as a referral commission.
+
+model LockReferralReward {
+  id          String   @id @default(cuid())
+  userId      String                       // the referrer who earns the commission
+  user        User     @relation(fields: [userId], references: [id])
+  lockId      String                       // the lock that generated this reward
+  lockOwnerId String                       // the user who owned the lock
+  tier        Int                          // 1 = direct, 2 = second-level, 3 = third
+  rate        Float                        // commission rate applied (e.g. 0.10)
+  amount      Float                        // DCC credited
+  redeemed    Boolean  @default(false)
+  redeemedAt  DateTime?
+  redeemTxId  String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, lockId])               // one reward per referrer per lock
+  @@index([userId])
+  @@index([lockId])
+}
+
+// ── DccDeposit ────────────────────────────
+// On-chain DCC sent to the rewards wallet gets credited to off-chain balance.
+// txId is unique to prevent double-credit.
+
+model DccDeposit {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  txId          String   @unique              // on-chain transfer tx ID
+  amount        Float                         // DCC credited
+  senderAddress String                        // user's wallet address
+  status        String   @default("COMPLETED")
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([txId])
+}
+
+// ── CampaignConfig ────────────────────────
+
+model CampaignConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  valueJson String
+  updatedAt DateTime @updatedAt
+}
+
+// ── AuditLog ──────────────────────────────
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorType    String   // "user" | "admin" | "system" | "bot"
+  actorId      String?
+  actor        User?    @relation("AuditActor", fields: [actorId], references: [id])
+  action       String
+  targetType   String?  // "user" | "wallet" | "referral" | "claim"
+  targetId     String?
+  metadataJson String?
+  createdAt    DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
