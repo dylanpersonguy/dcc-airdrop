@@ -152,13 +152,20 @@ export function eligibilityMessage(wallet: string, result: EligibilityResult): s
 
   const checklist = result.requirements
     .map((r) => {
-      const icon = r.completed ? '✅' : '⬜';
-      return `${icon} ${r.label}${r.progress ? ` — _${r.progress}_` : ''}`;
+      const icon = r.completed ? '✅' : '⬜️';
+      return `${icon} ${r.label} — _${r.progress || (r.completed ? 'Done' : 'Pending')}_`;
     })
     .join('\n');
 
+  const remaining = result.missingRequirements.length;
+  const bottomNote = remaining > 0
+    ? `💡 _Complete ${remaining} more to qualify!_`
+    : '🎉 _All requirements met — you\'re eligible!_';
+
   return `
 📋 *Eligibility Status*
+
+Every eligible user that completes all the steps will earn *3,500 DCC* 🎁
 
 Wallet: \`${wallet}\`
 Status: ${status}
@@ -166,11 +173,11 @@ Status: ${status}
 ${bar}  ${result.completedCount}/${result.totalCount}
 
 ${checklist}
-${
-  result.missingRequirements.length > 0
-    ? `\n💡 _Complete ${result.missingRequirements.length} more to qualify!_`
-    : '\n🎉 _All requirements met — you\'re eligible!_'
-}
+
+${bottomNote}
+
+ℹ️ Use /explainer to learn how to complete each step.
+⚠️ _Removing or unlocking LP before the airdrop ends will disqualify you._
 `.trim();
 }
 

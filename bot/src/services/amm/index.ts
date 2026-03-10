@@ -114,6 +114,17 @@ export interface TokenInfo {
   scripted: boolean;
 }
 
+export interface PoolStats {
+  poolKey: string;
+  volume24h: string;
+  volume7d: string;
+  fees24h: string;
+  fees7d: string;
+  tvl: string;
+  txCount24h: number;
+  apy: number;
+}
+
 // ── Pool Queries ──────────────────────────
 
 export async function listPools(): Promise<PoolSnapshot[]> {
@@ -121,7 +132,11 @@ export async function listPools(): Promise<PoolSnapshot[]> {
 }
 
 export async function getPool(poolKey: string): Promise<PoolSnapshot> {
-  return ammFetch<PoolSnapshot>(`/pools/${encodeURIComponent(poolKey)}`);
+  return ammFetch<PoolSnapshot>(`/pools/${poolKey}`);
+}
+
+export async function getPoolStats(poolKey: string): Promise<PoolStats> {
+  return ammFetch<PoolStats>(`/pools/${poolKey}/stats`);
 }
 
 // ── User Queries ──────────────────────────
@@ -184,4 +199,108 @@ export async function buildRemoveLiquidityTx(
     method: 'POST',
     body: JSON.stringify({ assetA, assetB, lpAmount, feeBps }),
   });
+}
+
+// ── Swap Quoting & Transaction Building ───
+
+export interface SwapQuote {
+  poolId: string;
+  assetIn: string;
+  assetOut: string;
+  feeBps: number;
+  amountIn: string;
+  amountOut: string;
+  minAmountOut: string;
+  priceImpactBps: string;
+  feeAmount: string;
+  route: string;
+}
+
+export interface SwapTxResponse {
+  tx: InvokeScriptTx;
+  quote: SwapQuote;
+}
+
+export async function quoteSwap(
+  assetIn: string,
+  assetOut: string,
+  amountIn: string,
+  feeBps = 35,
+  slippageBps = 50,
+): Promise<SwapQuote> {
+  const params = new URLSearchParams({
+    assetIn,
+    assetOut,
+    amountIn,
+    feeBps: String(feeBps),
+    slippageBps: String(slippageBps),
+  });
+  return ammFetch<SwapQuote>(`/quote/swap?${params}`);
+}
+
+export async function buildSwapTx(
+  assetIn: string,
+  assetOut: string,
+  amountIn: string,
+  feeBps = 35,
+  slippageBps = 50,
+): Promise<SwapTxResponse> {
+  return ammFetch<SwapTxResponse>('/tx/swap', {
+    method: 'POST',
+    body: JSON.stringify({ assetIn, assetOut, amountIn, feeBps, slippageBps }),
+  });
+}
+
+// ── On-chain APY computation ──────────────
+
+const POOL_CORE_ADDRESS = '3Dfh97WETii2jqHUZfw6AGsn3dLkAmvfiFm';
+
+async function readPoolCoreKey(key: string): Promise<number> {
+  try {
+    const url = `${config.DCC_NODE_URL}/addresses/data/${POOL_CORE_ADDRESS}/${encodeURIComponent(key)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return 0;
+    const data = (await res.json()) as { value: number };
+    return typeof data.value === 'number' ? data.value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Compute APY from on-chain cumulative fees, reserves, and pool creation time.
+ * Falls back to 0 if data is unavailable.
+ */
+export async function getOnChainPoolAPY(poolKey: string): Promise<{ apy: number; totalFeeDcc: number; volumeDcc: number }> {
+  try {
+    const [fees0, fees1, volume0, createdAt, r0, r1] = await Promise.all([
+      readPoolCoreKey(`pool:fees0:${poolKey}`),
+      readPoolCoreKey(`pool:fees1:${poolKey}`),
+      readPoolCoreKey(`pool:volume0:${poolKey}`),
+      readPoolCoreKey(`pool:createdAt:${poolKey}`),
+      readPoolCoreKey(`pool:r0:${poolKey}`),
+      readPoolCoreKey(`pool:r1:${poolKey}`),
+    ]);
+
+    const totalFeeDcc = (fees0 + fees1) / 1e8;
+    const volumeDcc = volume0 / 1e8;
+    const tvl = (r0 + r1) / 1e8;
+
+    if (tvl <= 0 || createdAt <= 0 || totalFeeDcc <= 0) {
+      return { apy: 0, totalFeeDcc, volumeDcc };
+    }
+
+    const ageMs = Date.now() - createdAt;
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+    if (ageDays < 0.001) return { apy: 0, totalFeeDcc, volumeDcc };
+
+    const dailyFeeRate = totalFeeDcc / tvl / ageDays;
+    const apy = dailyFeeRate * 365 * 100;
+
+    // Cap at 999% to avoid misleading values for very new pools
+    return { apy: Math.min(apy, 999), totalFeeDcc, volumeDcc };
+  } catch (err) {
+    logger.warn({ err, poolKey }, 'Failed to compute on-chain APY');
+    return { apy: 0, totalFeeDcc: 0, volumeDcc: 0 };
+  }
 }

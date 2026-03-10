@@ -142,6 +142,13 @@ export interface SessionData {
   lpAmountB?: string;
   lpFeeBps?: string;
   lpRemoveAmount?: string;
+  gameBet?: string;
+  swapAssetIn?: string;
+  swapAssetOut?: string;
+  swapAmountIn?: string;
+  swapAmountOut?: string;
+  swapMinOut?: string;
+  swapFeeBps?: string;
 }
 
 const SESSION_TTL = 3600; // 1 hour

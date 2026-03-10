@@ -1,31 +1,51 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Buy Handler — Purchase DCC with SOL/USDC/USDT
+// Buy Handler — Purchase DCC via NOWPayments
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { BotContext } from '../middleware';
 import { InlineKeyboard } from 'grammy';
 import { setSession, getSession, clearSession } from '../middleware';
-import { backToMainKeyboard, afterBuyKeyboard } from '../keyboards';
-import { buyTokenKeyboard, buyConfirmKeyboard, buyCheckStatusKeyboard } from '../keyboards';
+import { backToMainKeyboard, afterBuyKeyboard, buyConfirmKeyboard } from '../keyboards';
 import { editOrReply } from '../utils';
 import {
-  generateSolDeposit,
-  generateSplDeposit,
-  getDepositLimits,
-  registerTransfer,
-  getTransferStatus,
-  getLocalQuote,
-  DCC_PRICE_USD,
-} from '../../services/bridge';
-import { getUserWallet } from '../../services/wallet';
-import { getOrCreateSolanaWallet } from '../../services/solana';
+  createPayment,
+  getPaymentStatus,
+  getEstimatedPrice,
+} from '../../services/nowpayments';
+import { DCC_PRICE_USD } from '../../config/constants';
 import prisma from '../../db/prisma';
 import { logger } from '../../utils/logger';
 import { audit } from '../../utils/audit';
 
-const SUPPORTED_TOKENS = ['SOL', 'USDC', 'USDT'] as const;
+const POPULAR_CRYPTOS = [
+  { symbol: 'BTC', emoji: '🟠', name: 'Bitcoin' },
+  { symbol: 'ETH', emoji: '🔷', name: 'Ethereum' },
+  { symbol: 'SOL', emoji: '🟣', name: 'Solana' },
+  { symbol: 'USDT', emoji: '🟢', name: 'Tether' },
+  { symbol: 'USDC', emoji: '🔵', name: 'USD Coin' },
+  { symbol: 'LTC', emoji: '⚪', name: 'Litecoin' },
+  { symbol: 'DOGE', emoji: '🐕', name: 'Dogecoin' },
+  { symbol: 'XRP', emoji: '⚫', name: 'Ripple' },
+  { symbol: 'BNB', emoji: '🟡', name: 'BNB' },
+  { symbol: 'MATIC', emoji: '🟣', name: 'Polygon' },
+  { symbol: 'TRX', emoji: '🔴', name: 'Tron' },
+  { symbol: 'ADA', emoji: '🔵', name: 'Cardano' },
+] as const;
 
-// ── Step 1: Show token selection ──────────
+function buyTokenKeyboard(): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (let i = 0; i < POPULAR_CRYPTOS.length; i++) {
+    const { symbol, emoji } = POPULAR_CRYPTOS[i];
+    kb.text(`${emoji} ${symbol}`, `buy_token_${symbol.toLowerCase()}`);
+    if (i % 3 === 2) kb.row();
+  }
+  if (POPULAR_CRYPTOS.length % 3 !== 0) kb.row();
+  kb.text('📋 Purchase History', 'buy_history').row();
+  kb.text('◀️ Main Menu', 'main_menu');
+  return kb;
+}
+
+// ── Step 1: Show crypto selection ─────────
 
 export async function handleBuy(ctx: BotContext): Promise<void> {
   if (!ctx.dbUser) return;
@@ -34,21 +54,16 @@ export async function handleBuy(ctx: BotContext): Promise<void> {
   await editOrReply(ctx, `
 💳 *Buy DCC — $${DCC_PRICE_USD}/DCC*
 
-Select the token you want to pay with:
+Select the crypto you want to pay with:
 
-🔶 *SOL* — Native Solana
-🔵 *USDC* — USD Coin (Solana)
-🟢 *USDT* — Tether (Solana)
-
-💲 Price: *$${DCC_PRICE_USD} per DCC*
-All purchases are processed via the SOL-Gateway bridge.
+Powered by NOWPayments — 150+ cryptocurrencies supported.
   `.trim(), {
     parse_mode: 'Markdown' as const,
     reply_markup: buyTokenKeyboard(),
   });
 }
 
-// ── Step 2: Token selected → ask amount ───
+// ── Step 2: Crypto selected → ask DCC amount
 
 export async function handleBuyToken(ctx: BotContext): Promise<void> {
   if (!ctx.dbUser) return;
@@ -57,48 +72,41 @@ export async function handleBuyToken(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery?.data;
   if (!data) return;
 
-  const token = data.replace('buy_token_', '').toUpperCase();
-  if (!SUPPORTED_TOKENS.includes(token as any)) return;
+  const token = data.replace('buy_token_', '').toLowerCase();
 
-  // Store selected token in session
   await setSession(ctx.dbUser.id, { step: 'buy:enter_amount', buyToken: token });
 
-  let limitsText = '';
-  try {
-    const limits = await getDepositLimits(token);
-    limitsText = `\nMin: *${limits.minDeposit} ${token}* · Max: *${limits.maxDeposit} ${token}*`;
-  } catch {
-    // Bridge may be unavailable — proceed without limits
-  }
-
-  const hint = token === 'SOL'
-    ? '_Type a SOL amount (e.g. 0.5, 1, 5):_'
-    : `_Type a ${token} amount (e.g. 10, 50, 100):_`;
-
   await editOrReply(ctx, `
-💳 *Buy DCC with ${token}*
+💳 *Buy DCC with ${token.toUpperCase()}*
 
 💲 Price: *$${DCC_PRICE_USD} per DCC*
 
-Enter the amount of *${token}* you want to spend:
-${limitsText}
+Enter the amount of *DCC* you want to buy:
 
-${hint}
+_Example: 100, 500, 1000, 5000_
   `.trim(), {
     parse_mode: 'Markdown' as const,
     reply_markup: backToMainKeyboard(),
   });
 }
 
-// ── Step 3: Amount entered → show quote ───
+// ── Step 3: DCC amount entered → show quote
 
 export async function handleBuyAmount(ctx: BotContext): Promise<void> {
   if (!ctx.dbUser || !ctx.message?.text) return;
 
-  const amount = parseFloat(ctx.message.text.trim());
-  if (isNaN(amount) || amount <= 0) {
+  const dccAmount = parseFloat(ctx.message.text.trim());
+  if (isNaN(dccAmount) || dccAmount <= 0) {
     await clearSession(ctx.dbUser.id);
     await ctx.reply('⚠️ Please enter a valid positive number.', {
+      parse_mode: 'Markdown',
+      reply_markup: backToMainKeyboard(),
+    });
+    return;
+  }
+
+  if (dccAmount < 10) {
+    await ctx.reply('⚠️ Minimum purchase is *10 DCC*. Please enter a larger amount.', {
       parse_mode: 'Markdown',
       reply_markup: backToMainKeyboard(),
     });
@@ -116,37 +124,28 @@ export async function handleBuyAmount(ctx: BotContext): Promise<void> {
   }
 
   try {
-    const quote = await getLocalQuote(token, amount);
+    const usdValue = dccAmount * DCC_PRICE_USD;
+    const estimatedCrypto = await getEstimatedPrice(usdValue, token);
 
-    if (quote.dccAmount <= 0) {
-      await ctx.reply('⚠️ Amount too small — would result in 0 DCC. Try a larger amount.', {
-        parse_mode: 'Markdown',
-        reply_markup: backToMainKeyboard(),
-      });
-      return;
-    }
-
-    // Store quote data in session
     await setSession(ctx.dbUser.id, {
       step: 'buy:confirm',
-      buyAmount: amount.toString(),
-      buyDccAmount: quote.dccAmount.toString(),
-      buyUsdValue: quote.usdValue.toString(),
+      buyDccAmount: dccAmount.toString(),
+      buyUsdValue: usdValue.toString(),
+      buyAmount: estimatedCrypto.toString(),
     });
-
-    const solLine = quote.solPrice
-      ? `│ SOL Price: *$${quote.solPrice.toFixed(2)}*\n` : '';
 
     await ctx.reply(`
 💳 *Buy DCC — Quote*
 
 ┌─────────────────────────
-│ Pay: *${amount} ${token}*
-${solLine}│ USD Value: *$${quote.usdValue.toFixed(2)}*
-│ DCC Price: *$${DCC_PRICE_USD}/DCC*
+│ DCC: *${dccAmount.toLocaleString()} DCC*
+│ USD Value: *$${usdValue.toFixed(2)}*
 │ ──────────────────
-│ You receive: *${quote.dccAmount} DCC*
+│ Estimated: *~${estimatedCrypto} ${token.toUpperCase()}*
+│ DCC Price: *$${DCC_PRICE_USD}/DCC*
 └─────────────────────────
+
+⚠️ Final amount may vary slightly due to exchange rate fluctuations.
 
 DCC will be added to your *off-chain balance*.
 Use /redeem to move DCC to your on-chain wallet.
@@ -157,7 +156,7 @@ Confirm this purchase?
       reply_markup: buyConfirmKeyboard(),
     });
   } catch (err) {
-    logger.error({ err, token, amount }, 'Failed to generate quote');
+    logger.error({ err, token, dccAmount }, 'Failed to generate quote');
     await clearSession(ctx.dbUser.id);
     await ctx.reply('⚠️ Unable to generate a quote right now. Please try again.', {
       parse_mode: 'Markdown',
@@ -168,16 +167,16 @@ Confirm this purchase?
   }
 }
 
-// ── Step 4: Confirmed → show deposit address ──
+// ── Step 4: Confirmed → create NOWPayments payment
 
 export async function handleBuyConfirm(ctx: BotContext): Promise<void> {
   if (!ctx.dbUser) return;
   await ctx.answerCallbackQuery();
 
   const session = await getSession(ctx.dbUser.id);
-  const { buyToken: token, buyAmount: amountStr, buyDccAmount: dccAmountStr } = session;
+  const { buyToken: token, buyDccAmount: dccAmountStr, buyUsdValue: usdValueStr } = session;
 
-  if (!token || !amountStr || !dccAmountStr) {
+  if (!token || !dccAmountStr || !usdValueStr) {
     await clearSession(ctx.dbUser.id);
     await editOrReply(ctx, '⚠️ Session expired. Please use /buy to start over.', {
       parse_mode: 'Markdown' as const,
@@ -186,33 +185,36 @@ export async function handleBuyConfirm(ctx: BotContext): Promise<void> {
     return;
   }
 
-  const amount = parseFloat(amountStr);
   const dccAmount = parseFloat(dccAmountStr);
+  const usdValue = parseFloat(usdValueStr);
 
   try {
-    // Get user's DCC wallet address for bridge recipientDcc
-    const wallet = await getUserWallet(ctx.dbUser.id);
-    if (!wallet) {
-      await clearSession(ctx.dbUser.id);
-      await editOrReply(ctx, '⚠️ No wallet found. Use /start to create one first.', {
-        parse_mode: 'Markdown' as const,
-        reply_markup: backToMainKeyboard(),
-      });
-      return;
-    }
-
-    // Get or create custodial Solana wallet for this user
-    const solWallet = await getOrCreateSolanaWallet(ctx.dbUser.id);
-
-    // Create purchase record — deposit watcher will process it once SOL arrives
+    // Create purchase record first
     const purchase = await prisma.dccPurchase.create({
       data: {
         userId: ctx.dbUser.id,
-        token,
-        amountPaid: amount,
+        token: token.toUpperCase(),
+        amountPaid: 0,
         dccAmount,
-        depositAddress: solWallet.publicKey,
         status: 'PENDING',
+      },
+    });
+
+    // Create payment via NOWPayments
+    const payment = await createPayment(
+      usdValue,
+      token,
+      purchase.id,
+      `Buy ${dccAmount} DCC`,
+    );
+
+    // Update purchase with NOWPayments details
+    await prisma.dccPurchase.update({
+      where: { id: purchase.id },
+      data: {
+        amountPaid: payment.pay_amount,
+        bridgeTransferId: payment.payment_id.toString(),
+        depositAddress: payment.pay_address,
       },
     });
 
@@ -222,44 +224,56 @@ export async function handleBuyConfirm(ctx: BotContext): Promise<void> {
       action: 'purchase_initiated',
       targetType: 'user',
       targetId: ctx.dbUser.id,
-      metadata: { token, amount, dccAmount, purchaseId: purchase.id, depositAddress: solWallet.publicKey },
+      metadata: {
+        token: token.toUpperCase(),
+        payAmount: payment.pay_amount,
+        dccAmount,
+        usdValue,
+        purchaseId: purchase.id,
+        paymentId: payment.payment_id,
+        depositAddress: payment.pay_address,
+      },
     });
 
-    // Clear session
     await clearSession(ctx.dbUser.id);
 
+    const expiryNote = payment.expiration_estimate_date
+      ? `\n⏰ Expires: *${new Date(payment.expiration_estimate_date).toUTCString()}*`
+      : '';
+
     await editOrReply(ctx, `
-✅ *Deposit Address Ready*
+✅ *Payment Created*
 
-Send exactly *${amount} ${token}* to your personal Solana address:
+Send exactly *${payment.pay_amount} ${token.toUpperCase()}* to:
 
-\`${solWallet.publicKey}\`
+\`${payment.pay_address}\`
 
 ┌─────────────────────────
-│ Amount: *${amount} ${token}*
-│ You'll receive: *${dccAmount} DCC*
-│ DCC Wallet: \`${wallet.address}\`
+│ Pay: *${payment.pay_amount} ${token.toUpperCase()}*
+│ You receive: *${dccAmount.toLocaleString()} DCC*
+│ USD Value: *$${usdValue.toFixed(2)}*
 └─────────────────────────
+${expiryNote}
+⏳ Status updates automatically once your payment is detected.
+Use the button below to check your payment status.
 
-⏳ The bot will automatically detect your deposit and process the bridge transaction.
-
-⚠️ Send *only ${token}* to this address on the *Solana* network.
-⚠️ Do *not* send from an exchange — send from a Solana wallet you control.
+⚠️ Send *only ${token.toUpperCase()}* to this address.
+⚠️ Send the *exact amount* shown above.
     `.trim(), {
       parse_mode: 'Markdown' as const,
       reply_markup: new InlineKeyboard()
-        .text('📋 Purchase History', 'buy_history')
-        .row()
+        .text('🔄 Check Status', `buy_status_${payment.payment_id}`).row()
+        .text('📋 Purchase History', 'buy_history').row()
         .text('◀️ Main Menu', 'main_menu'),
     });
   } catch (err) {
-    logger.error({ err, token, amount }, 'Failed to generate deposit address');
+    logger.error({ err, token, dccAmount }, 'Failed to create payment');
     await clearSession(ctx.dbUser.id);
     await editOrReply(ctx, `
-⚠️ *Deposit Generation Failed*
+⚠️ *Payment Creation Failed*
 
-Could not generate your deposit address.
-Your funds are safe — nothing was charged.
+Could not create your payment.
+Please try again in a moment.
 
 Tap Retry to try again.
     `.trim(), {
@@ -285,7 +299,7 @@ export async function handleBuyCancel(ctx: BotContext): Promise<void> {
   });
 }
 
-// ── Check transfer status ─────────────────
+// ── Check payment status ──────────────────
 
 export async function handleBuyStatus(ctx: BotContext): Promise<void> {
   if (!ctx.dbUser) return;
@@ -294,83 +308,102 @@ export async function handleBuyStatus(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery?.data;
   if (!data) return;
 
-  const transferId = data.replace('buy_status_', '');
-  if (!transferId) return;
+  const paymentId = data.replace('buy_status_', '');
+  if (!paymentId) return;
 
   try {
-    const transfer = await getTransferStatus(transferId);
+    const payment = await getPaymentStatus(paymentId);
 
-    // Update DB purchase status if changed
-    if (transfer.status === 'completed') {
+    // Look up our DB record for DCC amount
+    const dbPurchase = await prisma.dccPurchase.findFirst({
+      where: { bridgeTransferId: paymentId, userId: ctx.dbUser.id },
+    });
+
+    // Map NOWPayments status → our DB status
+    const statusMap: Record<string, string> = {
+      waiting: 'PENDING',
+      confirming: 'DEPOSITED',
+      confirmed: 'DEPOSITED',
+      sending: 'DEPOSITED',
+      partially_paid: 'PENDING',
+      finished: 'COMPLETED',
+      failed: 'FAILED',
+      refunded: 'FAILED',
+      expired: 'EXPIRED',
+    };
+
+    const ourStatus = statusMap[payment.payment_status] ?? 'PENDING';
+
+    // Update DB if terminal status
+    if (ourStatus === 'COMPLETED' || ourStatus === 'FAILED' || ourStatus === 'EXPIRED') {
       await prisma.dccPurchase.updateMany({
-        where: { bridgeTransferId: transferId, userId: ctx.dbUser.id },
-        data: {
-          status: 'COMPLETED',
-          solanaTxId: transfer.sourceTxHash ?? undefined,
-        },
+        where: { bridgeTransferId: paymentId, userId: ctx.dbUser.id },
+        data: { status: ourStatus as any },
       });
-      await audit({
-        actorType: 'system',
-        action: 'purchase_completed',
-        targetType: 'user',
-        targetId: ctx.dbUser.id,
-        metadata: { transferId, amountFormatted: transfer.amountFormatted, sourceTxHash: transfer.sourceTxHash },
-      });
-    } else if (transfer.status === 'failed') {
-      await prisma.dccPurchase.updateMany({
-        where: { bridgeTransferId: transferId, userId: ctx.dbUser.id },
-        data: { status: 'FAILED' },
-      });
-      await audit({
-        actorType: 'system',
-        action: 'purchase_failed',
-        targetType: 'user',
-        targetId: ctx.dbUser.id,
-        metadata: { transferId, error: transfer.error },
-      });
+      if (ourStatus === 'COMPLETED') {
+        await audit({
+          actorType: 'system',
+          action: 'purchase_completed',
+          targetType: 'user',
+          targetId: ctx.dbUser.id,
+          metadata: {
+            paymentId,
+            actuallyPaid: payment.actually_paid,
+            payCurrency: payment.pay_currency,
+          },
+        });
+      }
     }
 
     const statusEmoji: Record<string, string> = {
-      pending_confirmation: '⏳',
-      awaiting_consensus: '⏳',
-      consensus_reached: '🔄',
-      minting: '🔄',
-      completed: '✅',
+      waiting: '⏳',
+      confirming: '🔄',
+      confirmed: '✅',
+      sending: '📤',
+      partially_paid: '⚠️',
+      finished: '✅',
       failed: '❌',
+      refunded: '↩️',
       expired: '⌛',
-      paused: '⏸️',
     };
 
-    const isComplete = transfer.status === 'completed';
-    const isFailed = transfer.status === 'failed' || transfer.status === 'expired';
-    const emoji = statusEmoji[transfer.status] ?? '❓';
+    const isComplete = payment.payment_status === 'finished';
+    const isFinal = ['finished', 'failed', 'refunded', 'expired'].includes(payment.payment_status);
+    const emoji = statusEmoji[payment.payment_status] ?? '❓';
 
     const completedNote = isComplete
       ? '\n\n💰 DCC has been added to your off-chain balance!\nUse /redeem to move it to your on-chain wallet.'
       : '';
 
+    const paidNote = payment.actually_paid > 0
+      ? `│ Paid: *${payment.actually_paid} ${payment.pay_currency.toUpperCase()}*\n`
+      : '';
+
+    const dccAmount = dbPurchase?.dccAmount ?? 0;
+
     await editOrReply(ctx, `
-📋 *Transfer Status*
+📋 *Payment Status*
 
 ┌─────────────────────────
-│ ID: \`${transfer.transferId}\`
-│ Status: ${emoji} *${transfer.status.toUpperCase().replace(/_/g, ' ')}*
-│ Amount: ${transfer.amountFormatted}
-│ Direction: ${transfer.direction === 'sol_to_dcc' ? 'SOL → DCC' : 'DCC → SOL'}
-│ Confirmations: ${transfer.confirmations}
-${transfer.sourceTxHash ? `│ Source TX: \`${transfer.sourceTxHash}\`\n` : ''}${transfer.destTxHash ? `│ Dest TX: \`${transfer.destTxHash}\`\n` : ''}└─────────────────────────
+│ Status: ${emoji} *${payment.payment_status.toUpperCase().replace(/_/g, ' ')}*
+│ Expected: *${payment.pay_amount} ${payment.pay_currency.toUpperCase()}*
+${paidNote}│ DCC: *${dccAmount.toLocaleString()} DCC*
+│ USD: *$${payment.price_amount.toFixed(2)}*
+└─────────────────────────
 ${completedNote}
     `.trim(), {
       parse_mode: 'Markdown' as const,
       reply_markup: isComplete
         ? afterBuyKeyboard()
-        : isFailed
+        : isFinal
         ? backToMainKeyboard()
-        : buyCheckStatusKeyboard(transferId),
+        : new InlineKeyboard()
+            .text('🔄 Refresh Status', `buy_status_${paymentId}`).row()
+            .text('◀️ Main Menu', 'main_menu'),
     });
   } catch (err) {
-    logger.error({ err, transferId }, 'Failed to check transfer status');
-    await editOrReply(ctx, '⚠️ Could not check transfer status. Please try again.', {
+    logger.error({ err, paymentId }, 'Failed to check payment status');
+    await editOrReply(ctx, '⚠️ Could not check payment status. Please try again.', {
       parse_mode: 'Markdown' as const,
       reply_markup: backToMainKeyboard(),
     });
@@ -413,12 +446,26 @@ No purchases yet. Use /buy to purchase DCC!
     return `${statusEmoji} ${p.amountPaid} ${p.token} → ${p.dccAmount} DCC${redeemTag}`;
   });
 
+  // Add status check buttons for pending purchases
+  const pendingPurchases = purchases.filter(
+    (p) => p.status === 'PENDING' || p.status === 'DEPOSITED',
+  );
+
+  const kb = new InlineKeyboard();
+  for (const p of pendingPurchases.slice(0, 3)) {
+    if (p.bridgeTransferId) {
+      kb.text(`🔄 Check #${p.bridgeTransferId.slice(0, 8)}…`, `buy_status_${p.bridgeTransferId}`).row();
+    }
+  }
+  kb.text('💳 Buy More', 'buy').row();
+  kb.text('◀️ Main Menu', 'main_menu');
+
   await editOrReply(ctx, `
 📋 *Purchase History*
 
 ${lines.join('\n')}
   `.trim(), {
     parse_mode: 'Markdown' as const,
-    reply_markup: backToMainKeyboard(),
+    reply_markup: kb,
   });
 }

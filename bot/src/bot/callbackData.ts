@@ -53,6 +53,13 @@ export const CB = {
   // History
   HISTORY: 'history',
 
+  // Games
+  GAMES_MENU: 'games_menu',
+  GAME_SLOTS: 'game_slots',
+  GAME_MINES: 'game_mines',
+  GAME_CRASH: 'game_crash',
+  GAME_STATS: 'game_stats',
+
   // Help
   HELP_MENU: 'help_menu',
   HELP_HOW: 'help_how',

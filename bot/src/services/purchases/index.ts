@@ -63,6 +63,17 @@ export async function markPurchasesRedeemed(
 }
 
 /**
+ * Get total DCC bought by a user (sum of all completed purchases).
+ */
+export async function getTotalDccBought(userId: string): Promise<number> {
+  const result = await prisma.dccPurchase.aggregate({
+    where: { userId, status: 'COMPLETED' },
+    _sum: { dccAmount: true },
+  });
+  return result._sum.dccAmount ?? 0;
+}
+
+/**
  * Get total off-chain DCC balance for a user.
  * Delegates to the consolidated balance service with Redis caching.
  */

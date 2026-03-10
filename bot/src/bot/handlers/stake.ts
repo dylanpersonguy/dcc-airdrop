@@ -18,7 +18,7 @@ import {
   broadcastTx,
 } from '../../services/staking';
 import { generateWalletForUser, decryptWalletSeed } from '../../services/wallet';
-import { getCachedBalances } from '../../services/blockchain';
+import { getCachedBalances, invalidateCache, notifyTrackerStake, notifyTrackerUnstake } from '../../services/blockchain';
 import { invokeScript, broadcast } from '@waves/waves-transactions';
 import { config } from '../../config';
 import { logger } from '../../utils/logger';
@@ -356,6 +356,10 @@ export async function handleStakeConfirm(ctx: BotContext): Promise<void> {
     const result = await broadcast(signedTx, config.DCC_NODE_URL);
 
     await clearSession(ctx.dbUser.id);
+    await invalidateCache(wallet.address);
+
+    // Record stake activity on the eligibility tracker (fire-and-forget)
+    notifyTrackerStake(wallet.address, built.tx.dApp).catch(() => {});
 
     await audit({
       actorType: 'user',
@@ -365,6 +369,11 @@ export async function handleStakeConfirm(ctx: BotContext): Promise<void> {
       targetId: ctx.dbUser.id,
       metadata: { amount, txId: result.id },
     });
+
+    const stakeSuccessKb = new InlineKeyboard()
+      .text('🌊 Add Liquidity', 'liquidity').row()
+      .text('◀️ Staking', 'stake')
+      .text('🏠 Menu', 'main_menu');
 
     await editOrReply(ctx, `
 ✅ *Stake Successful!*
@@ -376,7 +385,7 @@ Staked *${amount} DCC* → stDCC
 Your stDCC will increase in value as rewards accumulate.
     `.trim(), {
       parse_mode: 'Markdown' as const,
-      reply_markup: backToStakeKeyboard(),
+      reply_markup: stakeSuccessKb,
     });
   } catch (err) {
     logger.error({ err }, 'Failed to execute stake');
@@ -427,6 +436,10 @@ export async function handleUnstakeConfirm(ctx: BotContext): Promise<void> {
     const result = await broadcast(signedTx, config.DCC_NODE_URL);
 
     await clearSession(ctx.dbUser.id);
+    await invalidateCache(wallet.address);
+
+    // Record unstake activity on the eligibility tracker (fire-and-forget)
+    notifyTrackerUnstake(wallet.address, built.tx.dApp, false).catch(() => {});
 
     await audit({
       actorType: 'user',

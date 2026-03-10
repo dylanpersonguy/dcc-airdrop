@@ -10,6 +10,9 @@ interface EligibilityInput {
   tracker: TrackerState;
   balances: WalletBalances;
   currentHeight: number;
+  totalDccBought?: number;
+  totalDccLocked?: number;
+  directReferralCount?: number;
 }
 
 /**
@@ -17,37 +20,49 @@ interface EligibilityInput {
  * This is the single source of truth for the requirement checklist.
  *
  * Rules (matching the EligibilityTracker / AirdropClaim design):
- *  1. walletAgeOk  — set by off-chain updater (wallet ≥ 21 days)
- *  2. txCountOk    — set by off-chain updater (≥ 5 txs)
- *  3. stDCC ≥ 100  — checked live from wallet balance
- *  4. poolCount ≥ 2
- *  5. hasCurrentLp  — currently providing LP
- *  6. LP age ≥ 7 days (MIN_LP_AGE_BLOCKS)
- *  7. swapCount ≥ 2
- *  8. dappCount ≥ 2
- *  9. sybilFlag == false
- * 10. claimed == false
+ *  1. walletAgeOk  — set by off-chain updater (wallet ≥ 7 days)
+ *  2. buyOk        — bought at least 100 DCC (off-chain DB)
+ *  3. lockOk       — locked at least 100 DCC (off-chain DB)
+ *  4. stDCC ≥ 100  — checked live from wallet balance
+ *  5. poolCount ≥ 2
+ *  6. hasCurrentLp  — currently providing LP
+ *  7. LP age ≥ 7 days (MIN_LP_AGE_BLOCKS)
+ *  8. txCountOk    — set by off-chain updater (≥ 5 txs)
+ *  9. inviteOk     — invited at least 1 user (off-chain DB)
+ * 10. swapCount ≥ 2
+ * 11. dappCount ≥ 2
+ * 12. sybilFlag == false
+ * 13. claimed == false
  */
 export function evaluateEligibility(input: EligibilityInput): EligibilityResult {
-  const { tracker: t, balances: b, currentHeight } = input;
+  const { tracker: t, balances: b, currentHeight, totalDccBought = 0, totalDccLocked = 0, directReferralCount = 0 } = input;
 
   const lpAgeBlocks = t.firstLpHeight > 0 ? currentHeight - t.firstLpHeight : 0;
   const minBalance = BigInt(config.MIN_STDCC_BALANCE);
   const hasEnoughStDCC = b.stDCCBalance >= minBalance;
   const lpAgeOk = lpAgeBlocks >= config.MIN_LP_AGE_BLOCKS;
+  const buyOk = totalDccBought >= 100;
+  const lockOk = totalDccLocked >= 100;
+  const inviteOk = directReferralCount >= 1;
 
   const requirements: EligibilityRequirement[] = [
     {
       key: 'walletAge',
-      label: 'Wallet age ≥ 21 days',
+      label: 'Wallet age ≥ 7 days',
       completed: t.walletAgeOk,
       progress: t.walletAgeOk ? 'Confirmed' : 'Pending verification',
     },
     {
-      key: 'txCount',
-      label: '5+ successful transactions',
-      completed: t.txCountOk,
-      progress: t.txCountOk ? 'Confirmed' : 'Pending verification',
+      key: 'buyDcc',
+      label: 'Buy at least 100 DCC',
+      completed: buyOk,
+      progress: buyOk ? `${totalDccBought.toFixed(0)} DCC bought` : `${totalDccBought.toFixed(0)} / 100 DCC`,
+    },
+    {
+      key: 'lockDcc',
+      label: 'Lock at least 100 DCC',
+      completed: lockOk,
+      progress: lockOk ? `${totalDccLocked.toFixed(0)} DCC locked` : `${totalDccLocked.toFixed(0)} / 100 DCC`,
     },
     {
       key: 'stDCCBalance',
@@ -74,6 +89,18 @@ export function evaluateEligibility(input: EligibilityInput): EligibilityResult 
       progress: t.firstLpHeight > 0
         ? `~${Math.floor(lpAgeBlocks / (60 * 24))}d (${lpAgeBlocks} blocks)`
         : 'No LP history',
+    },
+    {
+      key: 'txCount',
+      label: '5+ successful transactions',
+      completed: t.txCountOk,
+      progress: t.txCountOk ? 'Confirmed' : 'Pending verification',
+    },
+    {
+      key: 'inviteUser',
+      label: 'Invite 1 user to join using your referral link',
+      completed: inviteOk,
+      progress: inviteOk ? `${directReferralCount} invited` : `${directReferralCount} / 1`,
     },
     {
       key: 'swapCount',

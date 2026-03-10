@@ -59,6 +59,9 @@ const configSchema = z.object({
   // Bridge API (SOL-Gateway-DCC)
   BRIDGE_API_URL: z.string().url().default('http://localhost:3000/api/v1'),
 
+  // NOWPayments API (crypto payment gateway)
+  NOWPAYMENTS_API_KEY: z.string().default(''),
+
   // Solana RPC
   SOLANA_RPC_URL: z.string().url().default('https://api.mainnet-beta.solana.com'),
 

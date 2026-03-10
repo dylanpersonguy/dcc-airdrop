@@ -26,7 +26,35 @@ import { editOrReply } from '../utils';
 const MD = { parse_mode: 'Markdown' as const };
 
 export async function handleHelpMenu(ctx: BotContext): Promise<void> {
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery();
   await editOrReply(ctx, '❓ *Help & FAQ*\n\nSelect a topic below:', { ...MD, reply_markup: helpMenuKeyboard() });
+}
+
+export async function handleHelpAbout(ctx: BotContext): Promise<void> {
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery();
+  await editOrReply(ctx, `
+🔗 *What is DecentralChain?*
+
+DecentralChain is a *new Layer 1 blockchain* built for speed, scalability, and true decentralization.
+
+🌐 *Our Mission*
+We're building an entire ecosystem from the ground up — with DeFi, staking, an AMM, NFTs, and developer tools all native to the chain.
+
+💰 *The DCC Airdrop*
+This bot is distributing approximately *3% or more of the total DCC supply* to early supporters and community members. By participating, you're getting in on the ground floor of a brand-new blockchain ecosystem.
+
+🪙 *DCC — The Native Coin*
+DCC powers the entire DecentralChain network: transaction fees, staking rewards, governance votes, and liquidity incentives all run on DCC.
+
+🚀 *What You Can Do*
+• /buy — Purchase DCC
+• /stake — Stake DCC to earn stDCC rewards
+• /liquidity — Provide LP and earn trading fees
+• /lock — Lock DCC to boost your airdrop allocation
+• /referrals — Invite friends for bonus rewards
+
+🌍 Visit [DecentralChain.io](https://decentralchain.io) for more info.
+  `.trim(), { ...MD, reply_markup: backToHelpKeyboard() });
 }
 
 export async function handleHelpHow(ctx: BotContext): Promise<void> {

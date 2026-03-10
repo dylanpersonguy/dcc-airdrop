@@ -37,8 +37,10 @@ import {
   handleLpRemove,
   handleLpRemoveAmount,
   handleLpRemoveConfirm,
+  handleLpQuickAdd,
 } from './handlers/liquidity';
 import { handleMyEligibility, handleMyAirdrop } from './handlers/eligibility';
+import { handleExplainer } from './handlers/explainer';
 import {
   handleReferralsMenu,
   handleReferralLink,
@@ -71,6 +73,7 @@ import {
 } from './handlers/lock';
 import {
   handleHelpMenu,
+  handleHelpAbout,
   handleHelpHow,
   handleHelpEligibility,
   handleHelpVerification,
@@ -93,7 +96,48 @@ import {
   handleAdminSyncWallet,
   handleAdminSetClaimLive,
   handleAdminExportAllocations,
+  handleAdminGames,
+  handleAdminGamesLeaderboard,
+  handleAdminGamesUser,
+  handleAdminGamesExport,
 } from './handlers/admin';
+import {
+  handleSwap,
+  handleSwapDirection,
+  handleSwapPercent,
+  handleSwapAmount,
+  handleSwapConfirm,
+} from './handlers/swap';
+import {
+  handleGamesMenu,
+  handleGameStats,
+  handleSlots,
+  handleSlotsBetButton,
+  handleSlotsAmount,
+  handleMines,
+  handleMinesBetButton,
+  handleMinesAmount,
+  handleMinesStart,
+  handleMinesTile,
+  handleMinesCashOut,
+  handleMinesForfeit,
+  handleCrash,
+  handleCrashBetButton,
+  handleCrashAmount,
+  handleCrashNext,
+  handleCrashCashOut,
+  handleWheel,
+  handleWheelBetButton,
+  handleWheelAmount,
+  handleHiLo,
+  handleHiLoBetButton,
+  handleHiLoAmount,
+  handleHiLoGuess,
+  handleHiLoCashOut,
+  handleHiLoForfeit,
+  handleDailyPrize,
+  handleDailySpin,
+} from './handlers/games';
 
 // Keyboards
 import { mainMenuKeyboard } from './keyboards';
@@ -117,6 +161,7 @@ export function createBot(): Bot<BotContext> {
 
   bot.command('eligibility', handleMyEligibility);
   bot.command('airdrop', handleMyAirdrop);
+  bot.command('explainer', handleExplainer);
   bot.command('referrals', handleReferralsMenu);
   bot.command('claim', handleClaimStatus);
   bot.command('help', handleHelpMenu);
@@ -126,6 +171,8 @@ export function createBot(): Bot<BotContext> {
   bot.command('deposit', handleDeposit);
   bot.command('stake', handleStake);
   bot.command('liquidity', handleLiquidity);
+  bot.command('swap', handleSwap);
+  bot.command('games', handleGamesMenu);
 
   // ── Admin commands (guarded) ────────────
   bot.command('admin', requireAdmin, handleAdmin);
@@ -135,6 +182,10 @@ export function createBot(): Bot<BotContext> {
   bot.command('admin_sync_wallet', requireAdmin, handleAdminSyncWallet);
   bot.command('admin_set_claim_live', requireAdmin, handleAdminSetClaimLive);
   bot.command('admin_export_allocations', requireAdmin, handleAdminExportAllocations);
+  bot.command('admin_games', requireAdmin, handleAdminGames);
+  bot.command('admin_games_leaderboard', requireAdmin, handleAdminGamesLeaderboard);
+  bot.command('admin_games_user', requireAdmin, handleAdminGamesUser);
+  bot.command('admin_games_export', requireAdmin, handleAdminGamesExport);
 
   // ── Callback queries (inline buttons) ───
   bot.callbackQuery('main_menu', async (ctx) => {
@@ -180,10 +231,18 @@ export function createBot(): Bot<BotContext> {
   bot.callbackQuery('stake_confirm', handleStakeConfirm);
   bot.callbackQuery('unstake_confirm', handleUnstakeConfirm);
 
+  // Swap
+  bot.callbackQuery('swap', handleSwap);
+  bot.callbackQuery('swap_dcc_to_stdcc', handleSwapDirection);
+  bot.callbackQuery('swap_stdcc_to_dcc', handleSwapDirection);
+  bot.callbackQuery(/^swap_pct_/, handleSwapPercent);
+  bot.callbackQuery('swap_confirm', handleSwapConfirm);
+
   // Liquidity
   bot.callbackQuery('liquidity', handleLiquidity);
   bot.callbackQuery(/^lpp_/, handlePoolDetail);
   bot.callbackQuery('lp_positions', handleLpPositions);
+  bot.callbackQuery(/^lp_quick_/, handleLpQuickAdd);
   bot.callbackQuery(/^lpa_/, handleLpAdd);
   bot.callbackQuery('lp_confirm', handleLpConfirm);
   bot.callbackQuery('lp_remove_confirm', handleLpRemoveConfirm);
@@ -191,6 +250,7 @@ export function createBot(): Bot<BotContext> {
 
   // Eligibility / airdrop
   bot.callbackQuery('my_eligibility', handleMyEligibility);
+  bot.callbackQuery('explainer', handleExplainer);
   bot.callbackQuery('my_airdrop', handleMyAirdrop);
 
   // Referrals
@@ -236,6 +296,7 @@ export function createBot(): Bot<BotContext> {
 
   // Help
   bot.callbackQuery('help_menu', handleHelpMenu);
+  bot.callbackQuery('help_about', handleHelpAbout);
   bot.callbackQuery('help_how', handleHelpHow);
   bot.callbackQuery('help_eligibility', handleHelpEligibility);
   bot.callbackQuery('help_verification', handleHelpVerification);
@@ -243,6 +304,33 @@ export function createBot(): Bot<BotContext> {
   bot.callbackQuery('help_support', handleHelpSupport);
   bot.callbackQuery('help_referral', handleHelpReferral);
   bot.callbackQuery('help_lock', handleHelpLock);
+
+  // Mini Games
+  bot.callbackQuery('games_menu', handleGamesMenu);
+  bot.callbackQuery('game_stats', handleGameStats);
+  bot.callbackQuery('game_slots', handleSlots);
+  bot.callbackQuery(/^slots_bet_/, handleSlotsBetButton);
+  bot.callbackQuery('game_mines', handleMines);
+  bot.callbackQuery(/^mines_bet_/, handleMinesBetButton);
+  bot.callbackQuery(/^mines_start_/, handleMinesStart);
+  bot.callbackQuery(/^mines_tile_/, handleMinesTile);
+  bot.callbackQuery('mines_cashout', handleMinesCashOut);
+  bot.callbackQuery('mines_forfeit', handleMinesForfeit);
+  bot.callbackQuery('game_crash', handleCrash);
+  bot.callbackQuery(/^crash_bet_/, handleCrashBetButton);
+  bot.callbackQuery('crash_next', handleCrashNext);
+  bot.callbackQuery('crash_cashout', handleCrashCashOut);
+  bot.callbackQuery('game_wheel', handleWheel);
+  bot.callbackQuery(/^wheel_bet_/, handleWheelBetButton);
+  bot.callbackQuery('game_hilo', handleHiLo);
+  bot.callbackQuery(/^hilo_bet_/, handleHiLoBetButton);
+  bot.callbackQuery('hilo_higher', handleHiLoGuess);
+  bot.callbackQuery('hilo_lower', handleHiLoGuess);
+  bot.callbackQuery('hilo_cashout', handleHiLoCashOut);
+  bot.callbackQuery('hilo_forfeit', handleHiLoForfeit);
+  bot.callbackQuery('game_daily', handleDailyPrize);
+  bot.callbackQuery('daily_spin', handleDailySpin);
+
 
   // ── Text message handler (session-based flows) ─
   bot.on('message:text', async (ctx) => {
@@ -261,12 +349,31 @@ export function createBot(): Bot<BotContext> {
     if (ctx.sessionStep === 'stake:enter_unstake_amount') {
       return handleUnstakeAmount(ctx);
     }
+    if (ctx.sessionStep === 'swap:enter_amount') {
+      return handleSwapAmount(ctx);
+    }
     if (ctx.sessionStep === 'lp:enter_amount') {
       return handleLpAmount(ctx);
     }
     if (ctx.sessionStep === 'lp:enter_remove_amount') {
       return handleLpRemoveAmount(ctx);
     }
+    if (ctx.sessionStep === 'game:slots_bet') {
+      return handleSlotsAmount(ctx);
+    }
+    if (ctx.sessionStep === 'game:mines_bet') {
+      return handleMinesAmount(ctx);
+    }
+    if (ctx.sessionStep === 'game:crash_bet') {
+      return handleCrashAmount(ctx);
+    }
+    if (ctx.sessionStep === 'game:wheel_bet') {
+      return handleWheelAmount(ctx);
+    }
+    if (ctx.sessionStep === 'game:hilo_bet') {
+      return handleHiLoAmount(ctx);
+    }
+
 
     // No active session — check if user might be typing an amount into an expired flow
     const text = ctx.message.text.trim();
@@ -276,6 +383,7 @@ export function createBot(): Bot<BotContext> {
         + '💳 /buy — Purchase DCC\n'
         + '🔒 /lock — Lock DCC\n'
         + '🥩 /stake — Stake DCC\n'
+        + '🔄 /swap — Swap Tokens\n'
         + '🌊 /liquidity — LP Pools',
         { parse_mode: 'Markdown', reply_markup: mainMenuKeyboard() },
       );

@@ -37,6 +37,7 @@ model User {
   dccLocks             DccLock[]
   lockReferralRewards  LockReferralReward[]
   dccDeposits          DccDeposit[]
+  gameTransactions     GameTransaction[]
   solanaWallet         SolanaWallet?
   auditLogs            AuditLog[]       @relation("AuditActor")
 
@@ -346,6 +347,28 @@ model DccDeposit {
 
   @@index([userId])
   @@index([txId])
+}
+
+// ── GameTransaction ───────────────────────
+// Casino mini-game results: slots, mines, crash.
+// Net profit/loss feeds into off-chain balance.
+
+model GameTransaction {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  game       String   // "slots" | "mines" | "crash"
+  betAmount  Float
+  payout     Float    // 0 if lost, winnings if won
+  profit     Float    // payout - betAmount (negative = loss)
+  multiplier Float    // e.g. 50.0
+  details    String?  // JSON with game-specific details
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([game])
+  @@index([createdAt])
 }
 
 // ── CampaignConfig ────────────────────────

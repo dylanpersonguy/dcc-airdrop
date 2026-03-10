@@ -1,5 +1,6 @@
 const fs = require('fs');
-const { setScript, broadcast, invokeScript } = require('@waves/waves-transactions');
+const { setScript, broadcast, invokeScript, libs } = require('@waves/waves-transactions');
+const { address } = libs.crypto;
 
 const NODE_URL = process.env.DCC_NODE_URL || 'https://mainnet-node.decentralchain.io';
 const SEED = process.env.DEPLOYER_SEED;
@@ -10,6 +11,10 @@ if (!SEED) {
   console.error('Usage: DEPLOYER_SEED="your seed phrase" node deploy-contract.js');
   process.exit(1);
 }
+
+// Derive the deployer address from seed + chain ID
+const DEPLOYER_ADDRESS = address(SEED, String.fromCharCode(CHAIN_ID));
+console.log('Deployer address:', DEPLOYER_ADDRESS);
 
 async function compileRide(source) {
   const resp = await fetch(`${NODE_URL}/utils/script/compileCode`, {
@@ -47,13 +52,12 @@ async function main() {
 
   // 4. Call init() on the contract
   console.log('Calling init()...');
-  const deployerAddress = setScriptTx.sender;
   const initTx = invokeScript({
-    dApp: deployerAddress,
+    dApp: DEPLOYER_ADDRESS,
     call: { function: 'init', args: [] },
     payment: [],
     chainId: CHAIN_ID,
-    fee: 500000,
+    fee: 900000,
   }, SEED);
   console.log('Init TX ID:', initTx.id);
 
@@ -62,7 +66,7 @@ async function main() {
   console.log('init() broadcast success! TX:', initResult.id);
 
   console.log('\n=== DEPLOYMENT COMPLETE ===');
-  console.log('Contract address:', setScriptTx.sender);
+  console.log('Contract address:', DEPLOYER_ADDRESS);
   console.log('SetScript TX:', setScriptResult.id);
   console.log('Init TX:', initResult.id);
 }

@@ -44,7 +44,12 @@ async function main(): Promise<void> {
 
   // 5. Start bot in polling mode
   logger.info('Bot starting in polling mode...');
+
+  // Force-clear any competing getUpdates session
+  await bot.api.deleteWebhook({ drop_pending_updates: true });
+
   bot.start({
+    drop_pending_updates: true,
     onStart: (botInfo) => {
       logger.info({ username: botInfo.username }, 'Bot is running');
     },

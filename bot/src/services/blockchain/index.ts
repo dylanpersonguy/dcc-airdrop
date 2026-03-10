@@ -15,10 +15,11 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import fetch from 'node-fetch';
+import { invokeScript, broadcast } from '@waves/waves-transactions';
 import { config } from '../../config';
 import { logger } from '../../utils/logger';
 import { getRedis } from '../../utils/redis';
-import { BLOCKCHAIN_CACHE_TTL, NODE_MAX_RETRIES, NODE_RETRY_BASE_DELAY_MS } from '../../config/constants';
+import { BLOCKCHAIN_CACHE_TTL, NODE_MAX_RETRIES, NODE_RETRY_BASE_DELAY_MS, DCC_CHAIN_ID } from '../../config/constants';
 import type { TrackerState, WalletBalances, OnChainClaimState } from '../../types';
 
 const NODE = config.DCC_NODE_URL;
@@ -76,7 +77,7 @@ async function readKey(contractAddr: string, key: string): Promise<DataEntry | n
 
 /** Read multiple keys matching a prefix via regex */
 async function readKeysByPrefix(contractAddr: string, prefix: string): Promise<DataEntry[]> {
-  const encoded = encodeURIComponent(`^${escapeRegex(prefix)}`);
+  const encoded = encodeURIComponent(`${escapeRegex(prefix)}.*`);
   return nodeGet<DataEntry[]>(`/addresses/data/${contractAddr}?matches=${encoded}`);
 }
 
@@ -226,6 +227,82 @@ export async function verifyDataTransaction(
     logger.warn({ err, wallet }, 'Failed to verify data transaction');
     return false;
   }
+}
+
+// ── Tracker Activity Recording ────────────
+// Invoke the EligibilityTracker contract to record LP/swap/stake activity.
+// Uses the rewards wallet (must be registered as allowed dApp on the tracker).
+
+const INVOKE_FEE = 900_000; // 0.009 DCC (base 500k + 400k smart account extra)
+
+async function invokeTracker(funcName: string, args: Array<{ type: string; value: string | boolean | number }>): Promise<void> {
+  try {
+    const tx = invokeScript({
+      dApp: TRACKER,
+      call: { function: funcName, args: args as any },
+      payment: [],
+      fee: INVOKE_FEE,
+      chainId: DCC_CHAIN_ID,
+    }, config.REWARDS_WALLET_SEED);
+
+    await broadcast(tx, NODE);
+    logger.info({ func: funcName, args }, 'Tracker activity recorded');
+  } catch (err) {
+    logger.warn({ err, func: funcName, args }, 'Failed to record tracker activity (non-fatal)');
+  }
+}
+
+/** Record LP add on the eligibility tracker */
+export async function notifyTrackerLpAdd(userAddress: string, poolId: string, dappId: string): Promise<void> {
+  await invokeTracker('recordLpAdd', [
+    { type: 'string', value: userAddress },
+    { type: 'string', value: poolId },
+    { type: 'string', value: dappId },
+  ]);
+  await invalidateCache(userAddress);
+}
+
+/** Record LP remove on the eligibility tracker */
+export async function notifyTrackerLpRemove(
+  userAddress: string, poolId: string, dappId: string,
+  stillHasAnyLp: boolean, stillHasLpInThisPool: boolean,
+): Promise<void> {
+  await invokeTracker('recordLpRemove', [
+    { type: 'string', value: userAddress },
+    { type: 'string', value: poolId },
+    { type: 'string', value: dappId },
+    { type: 'boolean', value: stillHasAnyLp },
+    { type: 'boolean', value: stillHasLpInThisPool },
+  ]);
+  await invalidateCache(userAddress);
+}
+
+/** Record swap on the eligibility tracker */
+export async function notifyTrackerSwap(userAddress: string, dappId: string): Promise<void> {
+  await invokeTracker('recordSwap', [
+    { type: 'string', value: userAddress },
+    { type: 'string', value: dappId },
+  ]);
+  await invalidateCache(userAddress);
+}
+
+/** Record stake on the eligibility tracker */
+export async function notifyTrackerStake(userAddress: string, dappId: string): Promise<void> {
+  await invokeTracker('recordStake', [
+    { type: 'string', value: userAddress },
+    { type: 'string', value: dappId },
+  ]);
+  await invalidateCache(userAddress);
+}
+
+/** Record unstake on the eligibility tracker */
+export async function notifyTrackerUnstake(userAddress: string, dappId: string, stillHasStake: boolean): Promise<void> {
+  await invokeTracker('recordUnstake', [
+    { type: 'string', value: userAddress },
+    { type: 'string', value: dappId },
+    { type: 'boolean', value: stillHasStake },
+  ]);
+  await invalidateCache(userAddress);
 }
 
 // ── Cached wrapper (optional, uses Redis) ─

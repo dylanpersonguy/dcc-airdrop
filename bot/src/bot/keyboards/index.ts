@@ -18,8 +18,11 @@ export function mainMenuKeyboard(): InlineKeyboard {
     .text('📥 Deposit', 'deposit').row()
     .text('🔒 Lock & Earn', 'lock')
     .text('💸 Redeem', 'redeem').row()
-    .text('🥩 Stake', 'stake').row()
+    .text('🥩 Stake', 'stake')
+    .text('🔄 Swap', 'swap').row()
     .text('🌊 Liquidity', 'liquidity').row()
+    .text('─────────────────', 'noop').row()
+    .text('🎲 Mini Games', 'games_menu').row()
     .text('─────────────────', 'noop').row()
     .text('📋 Claim Status', 'claim_status')
     .text('❓ Help & FAQ', 'help_menu');
@@ -35,8 +38,11 @@ export function walletMenuKeyboard(hasOnChain: boolean = false, hasOffChain: boo
     kb.text('🔒 Lock DCC', 'lock')
       .text('🎁 Redeem DCC', 'redeem').row();
   }
-  kb.text('� Balances', 'wallet_balances')
-    .text('🥩 Stake', 'stake').row();  kb.text('🌊 Liquidity', 'liquidity').row();  kb.text('�📋 Copy Address', 'wallet_address')
+  kb.text('💰 Balances', 'wallet_balances')
+    .text('🥩 Stake', 'stake').row();
+  kb.text('🔄 Swap', 'swap')
+    .text('🌊 Liquidity', 'liquidity').row();
+  kb.text('📋 Copy Address', 'wallet_address')
     .text('🔑 Export Seed', 'export_seed').row()
     .text('📜 Activity', 'history')
     .text('◀️ Main Menu', 'main_menu');
@@ -64,13 +70,14 @@ export function referralsMenuKeyboard(): InlineKeyboard {
 // ── Help submenu ──────────────────────────
 export function helpMenuKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
+    .text('🔗 What is DecentralChain?', 'help_about').row()
     .text('📘 How It Works', 'help_how')
     .text('📋 Eligibility Rules', 'help_eligibility').row()
     .text('🔐 Verification', 'help_verification')
     .text('💰 Claim FAQ', 'help_claim').row()
     .text('👥 Referral Guide', 'help_referral')
-    .text('� Lock & Earn', 'help_lock').row()
-    .text('�📞 Support', 'help_support').row()
+    .text('🔒 Lock & Earn', 'help_lock').row()
+    .text('📞 Support', 'help_support').row()
     .text('◀️ Main Menu', 'main_menu');
 }
 
@@ -125,25 +132,10 @@ export function paginationKeyboard(
 
 // ── Buy DCC keyboards ────────────────────
 
-export function buyTokenKeyboard(): InlineKeyboard {
-  return new InlineKeyboard()
-    .text('🔶 SOL', 'buy_token_SOL')
-    .text('🔵 USDC', 'buy_token_USDC')
-    .text('🟢 USDT', 'buy_token_USDT').row()
-    .text('📋 Purchase History', 'buy_history').row()
-    .text('◀️ Main Menu', 'main_menu');
-}
-
 export function buyConfirmKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text('✅ Confirm Purchase', 'buy_confirm')
     .text('❌ Cancel', 'buy_cancel');
-}
-
-export function buyCheckStatusKeyboard(transferId: string): InlineKeyboard {
-  return new InlineKeyboard()
-    .text('🔄 Check Status', `buy_status_${transferId}`).row()
-    .text('◀️ Main Menu', 'main_menu');
 }
 
 // ── Lock DCC keyboards ───────────────────

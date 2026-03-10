@@ -11,6 +11,8 @@ import { getCachedTrackerState, getCachedBalances, getCurrentHeight } from '../.
 import { evaluateEligibility } from '../../services/eligibility';
 import { calculateAllocation } from '../../services/allocation';
 import { getReferralStats, advanceReferralStatus } from '../../services/referrals';
+import { getTotalDccBought } from '../../services/purchases';
+import { getLockedAmount } from '../../services/locks';
 import { logger } from '../../utils/logger';
 
 const MD = { parse_mode: 'Markdown' as const };
@@ -27,19 +29,25 @@ export async function handleMyEligibility(ctx: BotContext): Promise<void> {
     return;
   }
 
-  await ctx.answerCallbackQuery?.({ text: 'Loading eligibility...' }).catch(() => {});
+  if (ctx.callbackQuery) {
+    await ctx.answerCallbackQuery({ text: 'Loading eligibility...' }).catch(() => {});
+  }
 
   // Show loading indicator immediately
   await editOrReply(ctx, '⏳ Loading eligibility data...', { ...MD, reply_markup: backToMainKeyboard() });
 
   try {
-    const [tracker, balances, currentHeight] = await Promise.all([
+    const [tracker, balances, currentHeight, totalDccBought, totalDccLocked, refStats] = await Promise.all([
       getCachedTrackerState(wallet.address),
       getCachedBalances(wallet.address),
       getCurrentHeight(),
+      getTotalDccBought(ctx.dbUser.id),
+      getLockedAmount(ctx.dbUser.id),
+      getReferralStats(ctx.dbUser.id),
     ]);
 
-    const result = evaluateEligibility({ tracker, balances, currentHeight });
+    const directReferralCount = refStats.tiers.find((t) => t.tier === 1)?.referred ?? 0;
+    const result = evaluateEligibility({ tracker, balances, currentHeight, totalDccBought, totalDccLocked, directReferralCount });
 
     if (result.eligible) {
       await advanceReferralStatus(ctx.dbUser.id, 'ELIGIBLE');
@@ -75,14 +83,17 @@ export async function handleMyAirdrop(ctx: BotContext): Promise<void> {
   await editOrReply(ctx, '⏳ Calculating your airdrop allocation...', { ...MD, reply_markup: backToMainKeyboard() });
 
   try {
-    const [tracker, balances, currentHeight, refStats] = await Promise.all([
+    const [tracker, balances, currentHeight, refStats, totalDccBought, totalDccLocked] = await Promise.all([
       getCachedTrackerState(wallet.address),
       getCachedBalances(wallet.address),
       getCurrentHeight(),
       getReferralStats(ctx.dbUser.id),
+      getTotalDccBought(ctx.dbUser.id),
+      getLockedAmount(ctx.dbUser.id),
     ]);
 
-    const eligibility = evaluateEligibility({ tracker, balances, currentHeight });
+    const directReferralCount = refStats.tiers.find((t) => t.tier === 1)?.referred ?? 0;
+    const eligibility = evaluateEligibility({ tracker, balances, currentHeight, totalDccBought, totalDccLocked, directReferralCount });
 
     const allocation = calculateAllocation({
       eligible: eligibility.eligible,

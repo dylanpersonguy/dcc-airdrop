@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@waves/waves-transactions": "^4.3.11"
+  }
+}

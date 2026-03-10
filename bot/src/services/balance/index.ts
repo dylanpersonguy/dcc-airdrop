@@ -19,6 +19,7 @@ export interface FullBalance {
   lockEarnings: number;
   commissionEarnings: number;
   depositBalance: number;
+  gameProfit: number;
   locked: number;
   totalAvailable: number;
 }
@@ -54,13 +55,14 @@ export async function invalidateBalanceCache(userId: string): Promise<void> {
  * Internal: compute the balance from the database without caching.
  */
 async function computeBalance(userId: string): Promise<FullBalance> {
-  const [inviteRewards, purchases, activeLocks, completedLocks, commissionRewards, depositBal] = await Promise.all([
+  const [inviteRewards, purchases, activeLocks, completedLocks, commissionRewards, depositBal, gameAgg] = await Promise.all([
     prisma.inviteReward.findMany({ where: { userId } }),
     prisma.dccPurchase.findMany({ where: { userId, status: 'COMPLETED' } }),
     prisma.dccLock.findMany({ where: { userId, status: 'ACTIVE' } }),
     prisma.dccLock.findMany({ where: { userId, status: { in: ['COMPLETED', 'WITHDRAWN'] }, earningsRedeemed: false } }),
     prisma.lockReferralReward.findMany({ where: { userId } }),
     getDepositBalance(userId),
+    prisma.gameTransaction.aggregate({ where: { userId }, _sum: { profit: true } }),
   ]);
 
   const inviteTotal = inviteRewards.reduce((s, r) => s + r.amount, 0);
@@ -77,7 +79,9 @@ async function computeBalance(userId: string): Promise<FullBalance> {
     .filter((r) => !r.redeemed)
     .reduce((s, r) => s + r.amount, 0);
 
-  const totalAvailable = Math.max(0, inviteAvailable + purchaseAvailable - locked + lockEarnings + commissionEarnings + depositBal);
+  const gameProfit = gameAgg._sum.profit ?? 0;
+
+  const totalAvailable = Math.max(0, inviteAvailable + purchaseAvailable - locked + lockEarnings + commissionEarnings + depositBal + gameProfit);
 
   return {
     inviteAvailable,
@@ -85,6 +89,7 @@ async function computeBalance(userId: string): Promise<FullBalance> {
     lockEarnings,
     commissionEarnings,
     depositBalance: depositBal,
+    gameProfit,
     locked,
     totalAvailable,
   };

@@ -66,11 +66,26 @@ export async function generateWalletForUser(userId: string): Promise<GeneratedWa
     orderBy: { createdAt: 'desc' },
   });
   if (existing) {
-    const pubKey = publicKey(decrypt(existing.encryptedSeed!));
+    if (existing.encryptedSeed) {
+      const pubKey = publicKey(decrypt(existing.encryptedSeed));
+      return {
+        address: existing.address,
+        publicKey: pubKey,
+        wallet: existing,
+      };
+    }
+    // Wallet exists but has no seed — regenerate seed for it
+    const seed = randomSeed();
+    const encSeed = encrypt(seed);
+    const addr = deriveAddress(seed, CHAIN_ID);
+    const updated = await prisma.wallet.update({
+      where: { id: existing.id },
+      data: { encryptedSeed: encSeed, address: addr },
+    });
     return {
-      address: existing.address,
-      publicKey: pubKey,
-      wallet: existing,
+      address: updated.address,
+      publicKey: publicKey(seed),
+      wallet: updated,
     };
   }
 
